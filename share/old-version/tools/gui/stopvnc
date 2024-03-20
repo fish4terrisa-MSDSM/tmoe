@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+#################
+stop_vnc_main() {
+    FORCE_KILL_XVNC=true
+    tmoe_vnc_env
+    pkill_vnc
+    rm_vnc_lock
+    check_wsl
+    case "$1" in
+    -no-stop-dbus)
+        stopx11vnc
+        ;;
+    -no-stop-x11vnc) ;;
+    -x11)
+        stop_dbus_daemon
+        stopx11vnc
+        ;;
+    -h | --h | --help | -help)
+        cat <<-'EOF'
+			-no-stop-dbus    --不停止dbus-daemon
+			-no-stop-x11vnc  --不停止x11vnc
+            -x11              --停止x11vnc
+			-h               --获取帮助信息
+		EOF
+        ;;
+    *)
+        printf "%s\n" "${GREEN}Stopping ${YELLOW}vnc server${RESET} ..."
+        stopx11vnc 2>/dev/null
+        stop_dbus_daemon
+        #stopx11vnc
+        vnc_server_has_been_stopped
+        ;;
+    esac
+}
+############
+check_wsl() {
+    if [[ -r /proc/version ]]; then
+        UNAME="$(head -n 1 /proc/version)"
+        # if [ "$(uname -r | cut -d '-' -f 3)" = "Microsoft" ] || [ "$(uname -r | cut -d '-' -f 2)" = "microsoft" ]; then
+        case "${UNAME}" in
+        *Microsoft* | *microsoft*)
+            TMOE_CHROOT=true
+            TMOE_WSL=true
+            export TMOE_CHROOT TMOE_WSL
+            ;;
+        esac
+        # if [[ -r /etc/environment ]]; then
+        #     if grep -Eq '^[^#]*TMOE_CHROOT=.*true' /etc/environment 2>/dev/null; then
+        #         export TMOE_CHROOT=true
+        #     fi
+        # fi
+    fi
+}
+###########
+stopx11vnc() {
+    pkill Xvfb
+    remove_xsession_lock 233
+}
+##########
+tmoe_vnc_env() {
+    export USER="$(whoami)"
+    #CURRENT_PORT=$(sed -n p /usr/local/bin/startvnc | grep '\-geometry' | awk -F ' ' '$0=$NF' | cut -d ':' -f 2 | tail -n 1)
+    CURRENT_PORT=$(grep 'VNC_DISPLAY=' /usr/local/bin/startvnc | head -n 1 | awk 'BEGIN{FS="="} {print $2}' | cut -d '"' -f 2)
+    RED=$(printf '\033[31m')
+    GREEN=$(printf '\033[32m')
+    YELLOW=$(printf '\033[33m')
+    BLUE=$(printf '\033[34m')
+    PURPLE=$(printf '\033[35m')
+    CYAN=$(printf '\033[36m')
+    RESET=$(printf '\033[m')
+    BOLD=$(printf '\033[1m')
+}
+###########
+remove_xsession_lock() {
+    local port=$1
+    for i in /tmp/.X${port}-lock /tmp/.X11-unix/X${port}; do
+        rm -vf "$i" 2>/dev/null
+        if [[ -e "${i}" ]]; then
+            sudo rm -fv "$i"
+        fi
+    done
+}
+rm_vnc_lock() {
+    [[ $(command -v vncsession) ]] || vncserver -kill :"${CURRENT_PORT}" 2>/dev/null
+    remove_xsession_lock "${CURRENT_PORT}"
+}
+#############
+rm_dbus_pid_file() {
+    if [[ -n $(command -v sudo) ]]; then
+        sudo rm -vf /run/dbus/pid /var/run/dbus/pid /var/run/dbus/messagebus.pid /run/messagebus.pid /var/run/dbus/messagebus.pid /var/run/messagebus.pid 2>/dev/null
+    else
+        su -c "rm -vf /run/dbus/pid /var/run/dbus/pid /var/run/dbus/messagebus.pid /run/messagebus.pid /var/run/dbus/messagebus.pid /var/run/messagebus.pid 2>/dev/null"
+    fi
+}
+############
+stop_dbus_daemon() {
+    case ${TMOE_CHROOT} in
+    true)
+        DBUS_PID_1="/var/run/dbus/pid"
+        DBUS_PID_2="/run/dbus/dbus.pid"
+
+        for i in $DBUS_PID_1 $DBUS_PID_2; do
+            if [ -e "$i" ]; then
+                DBUS_PID=$(head -n1 $i)
+                printf "%s\n" "kill -9 ${DBUS_PID}"
+                sudo kill -9 ${DBUS_PID} || kill -9 ${DBUS_PID}
+                #此处不要用su -c "kill xxx"
+                rm_dbus_pid_file
+            fi
+        done
+        ;;
+    esac
+    #pkill dbus
+}
+##########
+check_pid_and_rm_file() {
+    local Pid_file Pid_name _Pid
+    Pid_file=$1
+    Pid_name=$2
+    if [[ $Pid_name = vnc || -e $Pid_file ]]; then
+        _Pid=$(head -n1 "$Pid_file")
+        printf "%s\n" \
+            "${PURPLE}Killing ${BLUE}$Pid_name ${CYAN}..." \
+            "${GREEN}kill ${YELLOW}-9 ${BLUE}${_Pid}${RESET}"
+        kill -9 ${_Pid} 2>/dev/null
+        rm -fv "${Pid_file}"
+    fi
+}
+pkill_all_vnc() {
+    for i in Xtightvnc Xtigervnc Xvnc; do
+        pkill $i
+    done
+}
+pkill_vnc() {
+    local Vnc_pid_file Session_pid_file
+    Vnc_pid_file="$HOME/.vnc/vnc.pid"
+    Session_pid_file="$HOME/.vnc/x.pid"
+
+    if [[ -e "$Vnc_pid_file" ]]; then
+        check_pid_and_rm_file "$Session_pid_file" "session"
+        check_pid_and_rm_file "$Vnc_pid_file" "vnc"
+        if $FORCE_KILL_XVNC; then
+            pkill_all_vnc
+        fi
+    else
+        pkill_all_vnc
+    fi
+    pkill websockify
+}
+#############
+vnc_server_has_been_stopped() {
+    if [ ! "$(pgrep Xvnc)" ]; then
+        case ${LANG} in
+        zh_*UTF-8)
+            printf "%s\n" "已${PURPLE}停止${RESET}${YELLOW}VNC服务${RESET}！"
+            printf "%s\n" "${YELLOW}VNC server${RESET} has been ${PURPLE}terminated${RESET}."
+            ;;
+        *) printf "%s\n" "${YELLOW}VNC server${RESET} has been ${PURPLE}terminated${RESET}." ;;
+        esac
+    fi
+}
+#################
+stop_vnc_main "$@"

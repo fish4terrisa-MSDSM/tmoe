@@ -1,0 +1,722 @@
+#!/usr/bin/env bash
+##############################
+configure_tmoe_container_main() {
+    case $1 in
+    dns) tmoe_container_dns ;;
+    -menu | *) configure_tmoe_container ;;
+    esac
+}
+#############
+configure_tmoe_container() {
+    RETURN_TO_WHERE='configure_tmoe_container'
+    RETURN_TO_MENU='configure_tmoe_container'
+    case ${TMOE_MENU_LANG} in
+    zh*)
+        OPT_1="DNS 域名解析系统"
+        OPT_2="Timezone 时区"
+        OPT_3="Shared dir 共享目录"
+        ;;
+    *)
+        OPT_1="DNS (Domain Name System)"
+        OPT_2="Timezone"
+        OPT_3="Shared dir"
+        ;;
+    esac
+
+    TMOE_OPTION=$("${TUI_BIN:-whiptail}" --title "CONF AND MANUAL" --menu "You can view the manual or modify the config here." 0 50 0 \
+        "1" "$OPT_1" \
+        "2" "$OPT_2" \
+        "3" "$OPT_3" \
+        "4" "fortune & hitokoto 一言" \
+        "5" "man mount" \
+        "6" "man umount" \
+        "7" "man x11vnc" \
+        "0" "🌚 Back 返回" \
+        3>&1 1>&2 2>&3)
+    ##############################
+    case "${TMOE_OPTION}" in
+    0 | "") proot_container_menu ;;
+    1) tmoe_container_dns ;;
+    2) tmoe_container_timezone ;;
+    3) tmoe_container_shared_dir ;;
+    4) do_you_want_to_enable_hitokoto ;;
+    5) man_mount ;;
+    6) man_umount ;;
+    7) man_x11vnc ;;
+    esac
+    ####################
+    press_enter_to_return
+    configure_tmoe_container
+}
+##########
+rootful_container_mount_conf() {
+    mkdir_rootless_dir rootful
+    container_mount_dir_menu
+}
+rootless_container_mount_conf() {
+    mkdir_rootless_dir rootless
+    container_mount_dir_menu
+}
+rootless_or_rootful() {
+    if ("${TUI_BIN:-whiptail}" --title "rootless or rootful" --yes-button "rootless" --no-button "rootful" --yesno "rootless: proot, podman\n rootful: chroot, unshare, nspawn" 8 50); then
+        rootless_container_mount_conf
+    else
+        rootful_container_mount_conf
+    fi
+}
+tmoe_container_shared_dir() {
+    case "$Container_variants" in
+    rootless) rootless_container_mount_conf ;;
+    rootful) rootful_container_mount_conf ;;
+    *) rootless_or_rootful ;;
+    esac
+}
+mkdir_rootless_dir() {
+    local Dir_name=$1
+    [[ -e ${CONFIG_FOLDER}/$Dir_name ]] || mkdir -pv "${CONFIG_FOLDER}/$Dir_name"
+}
+do_you_want_to_share_tf() {
+    TF_CONF="${CONFIG_FOLDER}/${Container_variants}/mount_tf.conf"
+    case ${TMOE_MENU_LANG} in
+    zh_*UTF-8) local _Title="在容器中共享宿主的TF卡/外置存储" ;;
+    *) local _Title="external storage" ;;
+    esac
+    if ("${TUI_BIN:-whiptail}" --title "$_Title" --yesno "Do you want to share the ~/storage/external-1?" 8 50); then
+        echo "MOUNT_TF=true" >"${TF_CONF}"
+    else
+        echo "MOUNT_TF=false" >"${TF_CONF}"
+    fi
+    chmod a+rw -v "${TF_CONF}"
+    cat "${TF_CONF}"
+}
+do_you_want_to_share_storage() {
+    case ${Container_variants} in
+    rootful) ;;
+    rootless)
+        case ${TMOE_MENU_LANG} in
+        zh_*UTF-8) local _Title="共享 /storage 目录" ;;
+        *) local _Title="Shared dir: /storage" ;;
+        esac
+        if ("${TUI_BIN:-whiptail}" --title "$_Title" --yesno "Do you want to share the /storage directory?" 8 50); then
+            echo "MOUNT_STORAGE=true" >"${STORAGE_CONF}"
+        else
+            echo "MOUNT_STORAGE=false" >"${STORAGE_CONF}"
+        fi
+        chmod a+rw -v "${STORAGE_CONF}"
+        cat "${STORAGE_CONF}"
+        ;;
+    esac
+}
+container_mount_termux_conf() {
+    RETURN_TO_WHERE='container_mount_termux_conf'
+    S_DIR=''
+    TERMUX_CONF="${CONFIG_FOLDER}/${Container_variants}/mount_termux.conf"
+    case ${TMOE_MENU_LANG} in
+    zh_*UTF-8)
+        local _Title="共享 HOME 目录"
+        local _Description="将宿主的主目录挂载至容器内部的/media/termux"
+        local OPT_2="None（禁用共享）"
+        local OPT_8="自定义路径"
+        local OPT_5="手动编辑"
+        ;;
+    *)
+        local _Title="Shared directory: HOME"
+        local _Description="Mount the host\'s HOME directory to /media/termux in the container."
+        local OPT_2="None (Disable sharing)"
+        local OPT_8="customize"
+        local OPT_5="edit manually"
+        ;;
+    esac
+    local SD_DIR_1="/data/data/com.termux/files"
+    if [[ -e "$SD_DIR_1" ]]; then
+        local SD_DIR_2="$SD_DIR_1"
+    else
+        local SD_DIR_2="/opt"
+    fi
+
+    TMOE_OPTION=$("${TUI_BIN:-whiptail}" --title "$_Title" --menu "$_Description" 0 50 0 \
+        "1" "${HOME}" \
+        "2" "$OPT_2" \
+        "3" "${SD_DIR_2}" \
+        "4" "$OPT_8" \
+        "5" "$OPT_5" \
+        "0" "🌚 Back" \
+        3>&1 1>&2 2>&3)
+    ##############################
+    case "${TMOE_OPTION}" in
+    0 | "")
+        case ${RETURN_TO_MENU} in
+        "") configure_tmoe_container ;;
+        *) ${RETURN_TO_MENU} ;;
+        esac
+        ;;
+    1) S_DIR="${HOME}" ;;
+    2) S_DIR="None" ;;
+    3) S_DIR="$SD_DIR_2" ;;
+    4) customize_your_sd_dir ;;
+    5)
+        for i in editor micro nano vi; do
+            if [[ -n $(command -v $i) ]]; then
+                ${i} "${TERMUX_CONF}"
+                break
+            fi
+        done
+        ;;
+    esac
+
+    case ${S_DIR} in
+    None) echo "MOUNT_TERMUX=false" >"${TERMUX_CONF}" ;;
+    "") ;;
+    *)
+        printf "%s\n" \
+            "MOUNT_TERMUX=true" \
+            "TERMUX_DIR=\"${S_DIR}\"" \
+            >"${TERMUX_CONF}"
+        chmod a+rw -v "${TERMUX_CONF}"
+        ;;
+    esac
+    [[ -s "${TERMUX_CONF}" ]] && cat "${TERMUX_CONF}"
+    ####################
+    press_enter_to_return
+    case ${RETURN_TO_MENU} in
+    "") container_mount_termux_conf ;;
+    *) ${RETURN_TO_MENU} ;;
+    esac
+}
+container_mount_sd_conf() {
+    RETURN_TO_WHERE='container_mount_sd_conf'
+    S_DIR=''
+    SD_CONF="${CONFIG_FOLDER}/${Container_variants}/mount_sd.conf"
+    STORAGE_CONF="${CONFIG_FOLDER}/${Container_variants}/mount_storage.conf"
+    case ${TMOE_MENU_LANG} in
+    zh_*UTF-8)
+        local _Title="共享 sd 目录"
+        local _Description="将宿主的内置 sd 挂载至容器内部的/media/sd\n当选择第三 或 第四个时,将共享（挂载）整个内置sd\n当为第二个（None）时,MOUNT_SD 将被设为 false,即不挂载sd\n请注意：这是全局配置,如需单独配置,请在各自的容器菜单里进行选择\n除非您有充足的理由,否则不建议您挂载整个内置存储/sd"
+        local OPT_2="None(禁用共享/挂载)"
+        local OPT_8="自定义路径"
+        local OPT_9="手动编辑"
+        ;;
+    *)
+        local _Title="Shared directory: sd"
+        local _Description="Mount the host\'s sd dir to /media/sd in the container.\nNote:it is a global configuration, for independent conf, please select it in the respective container menu.\nIt is not recommended that you mount the entire internal storage/sd."
+        local OPT_2="None (Disable sharing)"
+        local OPT_8="customize"
+        local OPT_9="edit manually"
+        ;;
+    esac
+
+    # local SD_DIR_1="/storage/self/primary"
+    case ${Container_variants} in
+    rootless)
+        mkdir_rootless_dir rootless
+        local SD_DIR_1="/storage/self/primary"
+        ;;
+    rootful)
+        mkdir_rootless_dir rootful
+        local SD_DIR_1="/data/media/0"
+        ;;
+    esac
+
+    TMOE_OPTION=$("${TUI_BIN:-whiptail}" --title "$_Title" --menu "$_Description" 0 50 0 \
+        "1" "${SD_DIR_1}/Download" \
+        "2" "$OPT_2" \
+        "3" "${SD_DIR_1}" \
+        "4" "/sdcard" \
+        "5" "/sdcard/Download" \
+        "6" "\${HOME}/sd/Download" \
+        "7" "\${HOME}/Downloads" \
+        "8" "$OPT_8" \
+        "9" "$OPT_9" \
+        "0" "🌚 Back" \
+        3>&1 1>&2 2>&3)
+    ##############################
+    case "${TMOE_OPTION}" in
+    0 | "")
+        case ${RETURN_TO_MENU} in
+        "") configure_tmoe_container ;;
+        *) ${RETURN_TO_MENU} ;;
+        esac
+        ;;
+    1) S_DIR="${SD_DIR_1}/Download" ;;
+    2) S_DIR="None" ;;
+    3)
+        do_you_want_to_share_storage
+        S_DIR="${SD_DIR_1}"
+        ;;
+    4)
+        do_you_want_to_share_storage
+        S_DIR='/sdcard'
+        ;;
+    5) S_DIR='/sdcard/Download' ;;
+    6) S_DIR="\${HOME}/sd/Download" ;;
+    7) S_DIR="\${HOME}/Downloads" ;;
+    8) customize_your_sd_dir ;;
+    9)
+        for i in editor micro nano vi; do
+            if [[ -n $(command -v $i) ]]; then
+                ${i} "${SD_CONF}"
+                break
+            fi
+        done
+        ;;
+    esac
+
+    case ${S_DIR} in
+    None) echo "MOUNT_SD=false" >"${SD_CONF}" ;;
+    "") ;;
+    *)
+        printf "%s\n" \
+            "MOUNT_SD=true" \
+            "SD_DIR_0=\"${S_DIR}\"" \
+            >"${SD_CONF}"
+        chmod a+rw -v "${SD_CONF}"
+        ;;
+    esac
+    [[ -s "${SD_CONF}" ]] && cat "${SD_CONF}"
+    ####################
+    press_enter_to_return
+    case ${RETURN_TO_MENU} in
+    "") container_mount_sd_conf ;;
+    *) ${RETURN_TO_MENU} ;;
+    esac
+}
+customize_your_sd_dir() {
+    case ${TMOE_MENU_LANG} in
+    zh_*UTF-8) local _Description2="请在下方输入一个绝对路径，支持使用\${HOME}变量" ;;
+    *) local _Description2="Please enter an absolute path" ;;
+    esac
+    S_DIR=$("${TUI_BIN:-whiptail}" --inputbox "$_Description2" 0 50 --title "ABS PATH" 3>&1 1>&2 2>&3)
+    if [[ "$?" != "0" ]]; then
+        printf "%s\n" "${RED}ERROR${RESET}"
+        press_enter_to_return
+        ${RETURN_TO_WHERE}
+    elif [[ -z ${S_DIR} ]]; then
+        printf "%s\n" "Please enter a valid value"
+        press_enter_to_return
+        ${RETURN_TO_WHERE}
+    fi
+}
+container_mount_dir_menu() {
+    RETURN_TO_WHERE='container_mount_dir_menu'
+    RETURN_TO_MENU='tmoe_container_shared_dir'
+    TMOE_OPTION=$("${TUI_BIN:-whiptail}" --title "SHARED DIR" --menu "You can either disable the shared directory or change it" 0 50 0 \
+        "1" "sd" \
+        "2" "storage" \
+        "3" "HOME" \
+        "4" "external-1" \
+        "0" "🌚 Back" \
+        3>&1 1>&2 2>&3)
+    ##############################
+    case "${TMOE_OPTION}" in
+    0 | "") configure_tmoe_container ;;
+    1) container_mount_sd_conf ;;
+    2)
+        case "$Container_variants" in
+        rootless) do_you_want_to_share_storage ;;
+        rootful) printf "%s\n" "${RED}Unfortunately${RESET}, this feature is disabled by default for the ${BLUE}rootful container.${RESET}" ;;
+        esac
+        ;;
+    3) container_mount_termux_conf ;;
+    4) do_you_want_to_share_tf ;;
+    esac
+    ####################
+    press_enter_to_return
+    container_mount_dir_menu
+}
+check_man_db() {
+    [[ $(command -v man) ]] || ${TMOE_INSTALLATION_COMMAND} man
+    [[ $(command -v man) ]] || ${TMOE_INSTALLATION_COMMAND} man-db
+    [[ ! $(command -v man) ]] || check_x11vnc_git_manual
+}
+#########
+check_x11vnc_git_manual() {
+    if [[ ! -e ${TMOE_LINUX_DIR}/docs/.git ]]; then
+        mkdir -pv ${TMOE_LINUX_DIR}
+        git clone -b main --depth=1 https://gitee.com/ak2/manual ${TMOE_LINUX_DIR}/docs
+    fi
+}
+#######
+man_mount() {
+    check_man_db
+    man ${TMOE_LINUX_DIR}/docs/mount.8
+}
+man_umount() {
+    check_man_db
+    man ${TMOE_LINUX_DIR}/docs/umount.8
+}
+man_x11vnc() {
+    check_man_db
+    man ${TMOE_LINUX_DIR}/docs/x11vnc.1
+}
+how_to_customize_dns() {
+    printf "%s\n %s\n" "When you enter the container, you can type ${GREEN}editor /etc/resolv.conf${RESET}" "or ${GREEN}nano /etc/resolv.conf${RESET} to modify the DNS configuration file."
+    printf "%s\n" "本功能仅适用于容器初始化配置，如需手动修改，则请在容器内部输入${GREEN}nano /etc/resolv.conf${RESET}"
+}
+#########
+tmoe_container_dns() {
+    RETURN_TO_WHERE='tmoe_container_dns'
+    DNS_NAME=''
+    local _Dns_cfiec="[240c::6666](CFIEC)"
+    local _Dns_cloudflare="[2606:4700:4700::1111](CloudFlare)"
+    case ${TMOE_MENU_LANG} in
+    zh_*UTF-8)
+        local _Description="DNS 是建立在分布式数据库上的分层命名系统,\n主要用于域名解析(用于命名组织到域层次结构中的计算机和网络服务)。"
+        local _Opt_1="$_Dns_cfiec"
+        local _Opt_1_name="cfiec"
+        local _Opt_2="$_Dns_cloudflare"
+        local _Opt_2_name="cloudflare"
+        local _Opt_7="手动编辑"
+        ;;
+    *)
+        local _Description="You can choose cloudflare or google dns."
+        local _Opt_1="$_Dns_cloudflare"
+        local _Opt_1_name="cloudflare"
+        local _Opt_2="$_Dns_cfiec"
+        local _Opt_2_name="cfiec"
+        local _Opt_7="manually edit"
+        ;;
+    esac
+
+    TMOE_OPTION=$("${TUI_BIN:-whiptail}" --title "DNS(Domain Name System)" --menu "${_Description}" 0 50 0 \
+        "1" "$_Opt_1" \
+        "2" "$_Opt_2" \
+        "3" "[2001:4860:4860::8888](Google)" \
+        "4" "[2400:3200::1](Ali)" \
+        "5" "[2400:da00::6666](Baidu)" \
+        "6" "[2001:da8::666](Tsinghua-Tuna)" \
+        "7" "$_Opt_7" \
+        "8" "How to customize dns?" \
+        "0" "🌚 Back 返回" \
+        3>&1 1>&2 2>&3)
+    ##############################
+    case "${TMOE_OPTION}" in
+    0 | "")
+        case ${RETURN_TO_MENU} in
+        "") configure_tmoe_container ;;
+        *) ${RETURN_TO_MENU} ;;
+        esac
+        ;;
+    1) DNS_NAME="$_Opt_1_name" ;;
+    2) DNS_NAME="$_Opt_2_name" ;;
+    3) DNS_NAME='google' ;;
+    4) DNS_NAME='ali' ;;
+    5) DNS_NAME='baidu' ;;
+    6) DNS_NAME='tuna' ;;
+    7) manually_edit_dns_conf ;;
+    8) how_to_customize_dns ;;
+    esac
+    [[ -z ${DNS_NAME} ]] || cp -vf ${TMOE_SHARE_DIR}/configuration/dns/${DNS_NAME} ${CONFIG_FOLDER}/default-dns.conf
+    ####################
+    press_enter_to_return
+    case ${RETURN_TO_MENU} in
+    "") tmoe_container_dns ;;
+    *) ${RETURN_TO_MENU} ;;
+    esac
+}
+manually_edit_dns_conf() {
+    for i in editor micro nano vi; do
+        if [[ -n $(command -v $i) ]]; then
+            ${i} ${CONFIG_FOLDER}/default-dns.conf
+            break
+        fi
+    done
+}
+##############
+is_your_timezone_gmt9() {
+    if ("${TUI_BIN:-whiptail}" --title "Is your timezone UTC+9" --yesno "UTC+9 = 東9區\nあなたのタイムゾーンは UTC +9 ですか" 9 50); then
+        TIMEZONE="GMT-9"
+    else
+        tmoe_container_timezone
+    fi
+}
+is_your_timezone_utc() {
+    if ("${TUI_BIN:-whiptail}" --title "Is your timezone ${TIME_ZONE}" --yesno "${DESCRIPTION}" 0 50); then
+        TIMEZONE="${TIME_ZONE}"
+    else
+        tmoe_container_timezone
+    fi
+}
+determining_timezone_by_region() {
+    case ${TMOE_MENU_LANG} in
+    zh_*UTF-8)
+        DESCRIPTION="當前時區是否爲東八區(UTC +8)?"
+        TIME_ZONE="GMT-8" #此處爲GMT-8而非+8
+        ;;
+    ja_JP.UTF-8)
+        DESCRIPTION="UTC+9 = 東9區\nあなたのタイムゾーンは UTC +9 ですか"
+        TIME_ZONE="GMT-9"
+        ;;
+    *_DE.UTF-8)
+        DESCRIPTION="Ist Ihre Zeitzone UTC+1?"
+        TIME_ZONE="GMT-1"
+        ;;
+    *)
+        DESCRIPTION="UTC: Universal Time Coordinated"
+        TIME_ZONE="UTC"
+        ;;
+    esac
+}
+what_is_your_timezone() {
+    unset TIME_ZONE
+    case ${LINUX_DISTRO} in
+    Android)
+        if [[ -n $(command -v getprop) ]]; then
+            TIME_ZONE=$(getprop persist.sys.timezone)
+        fi
+        ;;
+    *)
+        if [[ -r /etc/timezone ]]; then
+            TIME_ZONE=$(head -n 1 /etc/timezone)
+        fi
+        ;;
+    esac
+
+    if [[ -n ${TIME_ZONE} ]]; then
+        DESCRIPTION="Timezone: ${TIME_ZONE}"
+    else
+        determining_timezone_by_region
+    fi
+    is_your_timezone_utc
+    write_to_timezone_txt
+}
+check_time_zone_file() {
+    local _File="${CONFIG_FOLDER}/gitstatus/timezone.txt"
+    if [[ -r ${_File} ]]; then
+        TIMEZONE=$(sed -e "s@Etc/@@" -e 's@GMT@UTC@' ${_File} | tr '[+\-]' '[\-+]')
+    fi
+}
+tmoe_container_timezone() {
+    RETURN_TO_WHERE='tmoe_container_timezone'
+    unset TIMEZONE IMPORTANT_TIPS_03
+    check_time_zone_file
+    [[ -z ${TIMEZONE} ]] || IMPORTANT_TIPS_03="Current timzone of container is ${TIMEZONE}"
+    TMOE_OPTION=$("${TUI_BIN:-whiptail}" --title "TIMEZONE" --menu "UTC is the time standard commonly used across the world.\n${IMPORTANT_TIPS_03}" 0 50 0 \
+        "0" "🌚 Back" \
+        "1" "UTC+1" \
+        "2" "UTC+2" \
+        "3" "UTC+3" \
+        "4" "UTC+4" \
+        "5" "UTC+5" \
+        "6" "UTC+6" \
+        "7" "UTC+7" \
+        "8" "UTC+8" \
+        "9" "UTC+9" \
+        "10" "UTC+10" \
+        "11" "UTC+11" \
+        "12" "UTC+12" \
+        "13" "UTC+13" \
+        "14" "UTC+14" \
+        "15" "UTC" \
+        "16" "UTC-1" \
+        "17" "UTC-2" \
+        "18" "UTC-3" \
+        "19" "UTC-4" \
+        "20" "UTC-5" \
+        "21" "UTC-6" \
+        "22" "UTC-7" \
+        "23" "UTC-8" \
+        "24" "UTC-9" \
+        "25" "UTC-10" \
+        "26" "UTC-11" \
+        "27" "UTC-12" \
+        3>&1 1>&2 2>&3)
+    #LINUX Etc/GMT-8为GMT--8,即为GMT+8
+    ##############################
+    case "${TMOE_OPTION}" in
+    0 | "")
+        case ${RETURN_TO_MENU} in
+        "") configure_tmoe_container ;;
+        *) ${RETURN_TO_MENU} ;;
+        esac
+        ;;
+    1) TIMEZONE='GMT-1' ;;
+    2) TIMEZONE='GMT-2' ;;
+    3) TIMEZONE='GMT-3' ;;
+    4) TIMEZONE='GMT-4' ;;
+    5) TIMEZONE='GMT-5' ;;
+    6) TIMEZONE='GMT-6' ;;
+    7) TIMEZONE='GMT-7' ;;
+    8) TIMEZONE='GMT-8' ;;
+    9) TIMEZONE='GMT-9' ;;
+    10) TIMEZONE='GMT-10' ;;
+    11) TIMEZONE='GMT-11' ;;
+    12) TIMEZONE='GMT-12' ;;
+    13) TIMEZONE='GMT-13' ;;
+    14) TIMEZONE='GMT-14' ;;
+    15) TIMEZONE='UTC' ;;
+    16) TIMEZONE='GMT+1' ;;
+    17) TIMEZONE='GMT+2' ;;
+    18) TIMEZONE='GMT+3' ;;
+    19) TIMEZONE='GMT+4' ;;
+    20) TIMEZONE='GMT+5' ;;
+    21) TIMEZONE='GMT+6' ;;
+    22) TIMEZONE='GMT+7' ;;
+    23) TIMEZONE='GMT+8' ;;
+    24) TIMEZONE='GMT+9' ;;
+    25) TIMEZONE='GMT+10' ;;
+    26) TIMEZONE='GMT+11' ;;
+    27) TIMEZONE='GMT+12' ;;
+    esac
+    write_to_timezone_txt
+    check_time_zone_file
+    printf "${BLUE}%s${RESET}\n" "$TIMEZONE"
+    ####################
+    press_enter_to_return
+    case ${RETURN_TO_MENU} in
+    "") tmoe_container_timezone ;;
+    *) ${RETURN_TO_MENU} ;;
+    esac
+}
+write_to_timezone_txt() {
+    local _File="${CONFIG_FOLDER}/gitstatus/timezone.txt"
+    mkdir -pv "${_File%/*}"
+    case ${TIMEZONE} in
+    "") ;;
+    UTC* | GMT*) printf "%s\n" "Etc/${TIMEZONE}" >"${_File}" ;;
+    *) printf "%s\n" "${TIMEZONE}" >"${_File}" ;;
+    esac
+}
+install_fortunes() {
+    unset FORTUNES_MOD
+    if [[ ! $(command -v fortune) ]]; then
+        printf "${GREEN}%s ${PURPLE}%s${RESET}\n" "${TMOE_INSTALLATION_COMMAND}" "fortune"
+        ${TMOE_INSTALLATION_COMMAND} fortunes 2>/dev/null
+        ${TMOE_INSTALLATION_COMMAND} fortune-mod 2>/dev/null
+        ${TMOE_INSTALLATION_COMMAND} fortune 2>/dev/null
+        case ${TMOE_LANG} in
+        zh_*UTF-8) FORTUNES_MOD=zh ;;
+        bg_*UTF-8) FORTUNES_MOD=bg ;;
+        br_*UTF-8) FORTUNES_MOD=br ;;
+        cs_*UTF-8) FORTUNES_MOD=cs ;;
+        de_*UTF-8) FORTUNES_MOD=de ;;
+        eo_*UTF-8) FORTUNES_MOD=eo ;;
+        es_*UTF-8) FORTUNES_MOD=es ;;
+        fr_*UTF-8) FORTUNES_MOD=fr ;;
+        ga_*UTF-8) FORTUNES_MOD=ga ;;
+        it_*UTF-8) FORTUNES_MOD=it ;;
+        pl_*UTF-8) FORTUNES_MOD=pl ;;
+        ru_*UTF-8) FORTUNES_MOD=ru ;;
+        *) FORTUNES_MOD="bofh-excuses" ;;
+        esac
+        # case ${FORTUNES_MOD} in
+        # "") ;;
+        # *)
+        FORTUNES_MOD_02="debian-hints"
+        ${TMOE_INSTALLATION_COMMAND} fortunes-${FORTUNES_MOD} 2>/dev/null
+        if [[ -e /usr/share/games/fortunes/debian-hints ]]; then
+            printf "%s\n" "${PURPLE}sudo ${GREEN}apt ${RED}purge ${YELLOW}-y ${BLUE}fortunes-${FORTUNES_MOD_02}${RESET}"
+            apt purge -y fortunes-${FORTUNES_MOD_02}
+        fi
+        # ${TMOE_INSTALLATION_COMMAND} fortunes-${FORTUNES_MOD_02} 2>/dev/null
+        case ${TMOE_LANG} in
+        zh_*UTF-8)
+            THE_LATEST_DEB_REPO='https://mirrors.bfsu.edu.cn/debian/pool/main/f/fortune-zh/'
+            THE_LATEST_DEB_REPO_HINTS='https://mirrors.bfsu.edu.cn/debian/pool/main/f/fortunes-debian-hints/'
+            ;;
+        *)
+            THE_LATEST_DEB_REPO="https://ftp.debian.org/debian/pool/main/f/fortunes-${FORTUNES_MOD}/"
+            THE_LATEST_DEB_REPO_HINTS='https://ftp.debian.org/debian/pool/main/f/fortunes-debian-hints/'
+            ;;
+        esac
+        install_fortunes_mod
+        #     ;;
+        # esac
+    fi
+    printf "${YELLOW}%s${RESET}\n" "Enable completed."
+}
+install_fortunes_mod() {
+    case ${LINUX_DISTRO} in
+    Android)
+        case ${TMOE_LANG} in
+        en_*.UTF-8) ;;
+        *)
+            for i in art computers debian drugs ethnic fortunes humorists knghtbrd linux literature magic men-women news people pets politics science sports translate-me work cookie definitions education food goedel kids law linuxcookie love medicine miscellaneous paradoxum perl platitudes riddles songs-poems startrek wisdom zippy; do
+                [[ ! -s ${PREFIX}/share/games/fortunes/${i} ]] || rm -fv ${PREFIX}/share/games/fortunes/${i}
+            done
+            ;;
+        esac
+        THE_LATEST_DEB_VERSION="$(curl -L --max-time 20 ${THE_LATEST_DEB_REPO} | grep -Ev '\.dsc|\.tar\.xz' | grep 'deb' | awk -F '<a href=' '{print $2}' | grep deb | tail -n 1 | cut -d '"' -f 2)"
+        THE_LATEST_DEB_VERSION_HINTS="$(curl -L --max-time 20 ${THE_LATEST_DEB_REPO_HINTS} | grep -Ev '\.dsc|\.tar\.xz' | grep 'deb' | awk -F '<a href=' '{print $2}' | grep deb | cut -d '"' -f 2 | sort -n -k 2 -t . | tail -n 1)"
+        THE_LATEST_ISO_LINK="${THE_LATEST_DEB_REPO}${THE_LATEST_DEB_VERSION}"
+        THE_LATEST_ISO_LINK_HINTS="${THE_LATEST_DEB_REPO_HINTS}${THE_LATEST_DEB_VERSION_HINTS}"
+        TEMP_FOLDER=${TMPDIR}/.FORTUNES_TMP
+        mkdir -pv ${TEMP_FOLDER}
+        cd ${TEMP_FOLDER}
+        unset FORTUNE_BRANCH
+        case ${TMOE_LANG} in
+        zh_C*.UTF-8 | zh_S*.UTF-8)
+            # FORTUNE_BRANCH="$(base64 -d <<<emhfQ04K)"
+            unset FORTUNE_BRANCH
+            ;;
+        zh_*.UTF-8) FORTUNE_BRANCH="zh_TW" ;;
+        de* | en* | es* | fr* | it* | ja* | pt*) FORTUNE_BRANCH="${TMOE_LANG_QUATER}" ;;
+        *) FORTUNE_BRANCH="en" ;;
+        esac
+        if [[ -n ${FORTUNE_BRANCH} ]]; then
+            URL_1="https://github.com.cnpmjs.org/2moe/fortune.git"
+            URL_2="https://hub.fastgit.org/2moe/fortune.git"
+            URL_3="https://github.com/2moe/fortune.git"
+            DIR_NAME="debian-reference"
+            printf "%s\n" "${GREEN}git ${CYAN}clone ${YELLOW}-b ${BLUE}${FORTUNE_BRANCH} ${YELLOW}--depth=1 ${BLUE}${URL_3} ${PURPLE}${DIR_NAME}${RESET}"
+            git clone -b ${FORTUNE_BRANCH} --depth=1 ${URL_1} ${DIR_NAME} || git clone -b ${FORTUNE_BRANCH} --depth=1 ${URL_2} ${DIR_NAME} || git clone -b ${FORTUNE_BRANCH} --depth=1 ${URL_3} ${DIR_NAME}
+            for i in debian-reference debmake-doc; do
+                if [[ -e debian-reference/${i} ]]; then
+                    mv -vf debian-reference/${i}/*txt ${PREFIX}/share/games/fortunes
+                fi
+            done
+        fi
+        aria2c --console-log-level=warn --no-conf --allow-overwrite=true -o ${THE_LATEST_DEB_VERSION} "${THE_LATEST_ISO_LINK}"
+        aria2c --console-log-level=warn --no-conf --allow-overwrite=true -o ${THE_LATEST_DEB_VERSION_HINTS} "${THE_LATEST_ISO_LINK_HINTS}"
+        dpkg-deb -X ${THE_LATEST_DEB_VERSION} ./
+        dpkg-deb -X ${THE_LATEST_DEB_VERSION_HINTS} ./
+        cd usr/share/games/fortunes
+        for i in $(readlink ./*); do
+            mv -vf ${i} ${PREFIX}/share/games/fortunes
+        done
+        if [[ -e ${FORTUNES_MOD} ]]; then
+            cd ${FORTUNES_MOD}
+        else
+            case ${TMOE_LANG} in
+            zh_C*.UTF-8 | zh_S*.UTF-8) cd zh_C* ;;
+            zh_TW.UTF-8 | zh_*.UTF-8) cd zh_TW ;;
+            *) cd "${TMOE_LANG_QUATER}" ;;
+            esac
+        fi
+        for i in $(readlink ./*); do
+            mv -vf ${i} ${PREFIX}/share/games/fortunes
+        done
+        if [[ -e debian-hints ]]; then
+            cp -vf ${PWD}/debian-hints ${PREFIX}/share/games/fortunes
+        fi
+        if [[ -s ${PREFIX}/share/games/fortunes/debian-reference.zh-tw.txt ]]; then
+            for i in chinese song100 tang300; do
+                [[ ! -e ${PREFIX}/share/games/fortunes/${i} ]] || rm -fv ${PREFIX}/share/games/fortunes/${i} 2>/dev/null
+            done
+        fi
+        cd ${CURRENT_DIR} || cd ${HOME}
+        rm -rvf ${TEMP_FOLDER}
+        ;;
+    esac
+}
+##############
+do_you_want_to_enable_hitokoto() {
+    if ("${TUI_BIN:-whiptail}" --title "HITOKOTO AND FORTUNE" --yesno "DO YOU WANT TO ENABLE HITOKOTO?\n是否需要启用一言？♪(^∇^*) " 9 50); then
+        cat >${CONFIG_FOLDER}/hitokoto.conf <<-EOF
+			TMOE_CONTAINER_FORTUNE=true
+			TMOE_CONTAINER_HITOKOTO=true
+		EOF
+        install_fortunes
+    else
+        cat >${CONFIG_FOLDER}/hitokoto.conf <<-EOF
+			TMOE_CONTAINER_FORTUNE=false
+			TMOE_CONTAINER_HITOKOTO=false
+		EOF
+        if [[ $(command -v fortune) ]] || [ -e /usr/games/fortune ]; then
+            ${TMOE_REMOVAL_COMMAND} fortune
+            ${TMOE_REMOVAL_COMMAND} fortunes
+            ${TMOE_REMOVAL_COMMAND} fortunes-zh
+        fi
+    fi
+}
+###########
+#不包含$@

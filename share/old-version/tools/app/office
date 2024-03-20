@@ -1,0 +1,289 @@
+#############
+tmoe_documents_menu() {
+    RETURN_TO_WHERE='tmoe_documents_menu'
+    RETURN_TO_MENU='tmoe_documents_menu'
+    DEPENDENCY_01=""
+    DEPENDENCY_02=""
+    TMOE_APP=$(
+        whiptail --title "documents" --menu \
+            "Which software do you want to install?" 0 50 0 \
+            "1" "Libre office(开源、自由的办公文档软件)" \
+            "2" "Yozo 永中office(arm64,x64,秉承集成创新理念)" \
+            "3" "WPS office(打造新一代办公环境)" \
+            "4" "Meld(可视化的文本差异比较工具)" \
+            "5" "Kdiff3(KDE下的文件差异对比工具)" \
+            "6" "Chinese manual(中文手册)" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    ##########################
+    case "${TMOE_APP}" in
+    0 | "") software_center ;;
+    1) install_libre_office ;;
+    2) yozo_office_env ;;
+    3) install_wps_office ;;
+    4) install_meld ;;
+    5) install_kdiff3 ;;
+    6) install_chinese_manpages ;;
+    esac
+    # 4) free_office_env ;;
+    # "4" "Free office(x86,x64,全面支持微软Office文件)" \
+    ##########################
+    press_enter_to_return
+    tmoe_documents_menu
+}
+#############
+install_meld() {
+    DEPENDENCY_02="meld"
+    beta_features_quick_install
+}
+############
+install_kdiff3() {
+    DEPENDENCY_02="kdiff3"
+    beta_features_quick_install
+}
+#################
+free_office_env() {
+    DEPENDENCY_01="freeoffice"
+    GREP_NAME=${DEPENDENCY_01}
+    OFFICIAL_URL='https://www.freeoffice.com/download/applications'
+    tmoe_app_menu_01
+}
+############
+install_free_office() {
+    REPO_URL="${OFFICIAL_URL}"
+    THE_LATEST_DEB_URL=$(curl -L ${REPO_URL} | grep 'amd64.deb' | sed 's@ @\n@g' | grep deb | cut -d '"' -f 2 | cut -d '=' -f 2 | head -n 1)
+    case ${ARCH_TYPE} in
+    amd64) ;;
+    i386) THE_LATEST_DEB_URL=$(printf '%s\n' "${THE_LATEST_DEB_URL}" | sed "s@amd64.deb@${ARCH_TYPE}.deb@") ;;
+    esac
+    #https://www.softmaker.net/down/softmaker-freeoffice-2018_976-01_amd64.deb
+    #https://www.softmaker.net/down/softmaker-freeoffice-2018-976.x86_64.rpm
+    case ${LINUX_DISTRO} in
+    debian | arch) ;;
+    redhat)
+        case ${ARCH_TYPE} in
+        amd64)
+            THE_LATEST_DEB_URL="$(curl -L ${REPO_URL} | grep rpm | sed 's@ @\n@g' | grep 'rpm' | grep 'x86_64' | cut -d '"' -f 2 | cut -d '=' -f 2 | head -n 1)"
+            #THE_LATEST_DEB_URL=$(printf '%s\n' "${THE_LATEST_DEB_URL}" | sed "s@-01_amd64.deb@.x86_64.rpm@" | sed "s@_amd64.deb@.x86_64.rpm@")
+            ;;
+        i386)
+            THE_LATEST_DEB_URL=$(curl -L ${REPO_URL} | grep 'rpm' | sed 's@ @\n@g' | grep rpm | grep i386 | cut -d '"' -f 2 | cut -d '=' -f 2 | head -n 1)
+            #THE_LATEST_DEB_URL=$(printf '%s\n' "${THE_LATEST_DEB_URL}" | sed "s@-01_amd64.deb@.i386.rpm@" | sed "s@_amd64.deb@.i386.rpm@")
+            ;;
+        esac
+        ;;
+    esac
+    THE_LATEST_DEB_FILE=$(printf '%s\n' "${THE_LATEST_DEB_URL}" | awk -F '/' '{print $NF}')
+    THE_LATEST_DEB_VERSION=$(printf '%s\n' "${THE_LATEST_DEB_FILE}" | sed 's@.deb@@' | sed 's@softmaker-freeoffice-@@' | sed "s@${GREP_NAME}_@@")
+    check_deb_version
+    case ${ARCH_TYPE} in
+    amd64) ;;
+    i386) ;;
+    *) arch_does_not_support ;;
+    esac
+    download_and_install_deb
+}
+###################
+yozo_office_env() {
+    DEPENDENCY_01="yozo-office"
+    case ${LINUX_DISTRO} in
+    arch) DEPENDENCY_02="yozo-office-fonts" ;;
+    esac
+    GREP_NAME=${DEPENDENCY_01}
+    OFFICIAL_URL='https://www.yozosoft.com/product-officelinux.html'
+    tmoe_app_menu_01
+}
+############
+install_yozo_office() {
+    #REPO_URL='http://www.yozosoft.com/product-officelinux.html'
+    #https证书错误，因此不加s
+    #THE_LATEST_DEB_FILE=$(curl -L ${REPO_URL} | grep 'amd64.deb' | grep '=' | cut -d '=' -f 2 | cut -d '"' -f 2 | awk -F '/' '{print $NF}')
+    #THE_LATEST_DEB_URL="https://dl.yozosoft.com/portal-download/fileManager/PRODUCT/${THE_LATEST_DEB_FILE}"
+    #arm64) THE_LATEST_DEB_URL=$(printf '%s\n' "${THE_LATEST_DEB_URL}" | sed "s@amd64.deb@arm64.deb@") ;;
+    #https://dl.yozosoft.com/portal-download/fileManager/PRODUCT/yozo-office_8.0.1331.101ZH.S1_amd64.deb
+    #https://dl.yozosoft.com/portal-download/fileManager/PRODUCT/yozo-office-8.0.1331.101ZH.S1-1.x86_64.rpm
+    REPO_URL='https://aur.archlinux.org/packages/yozo-office/'
+    THE_LATEST_DEB_URL=$(curl -L ${REPO_URL} | grep deb | cut -d '=' -f 2 | cut -d '"' -f 2 | head -n 1)
+
+    printf "%s\n" "若安装失败，则请前往官网${YELLOW}http://www.yozosoft.com/product-officelinux.html${RESET} 手动下载安装。"
+
+    printf "%s\n" \
+        "对于 amd64 架构，您可以使用 红帽系(例如 fedora) 和 debian 系(ubuntu, mint & kali等)" \
+        "对于 arm64 架构, 本工具仅能下载并安装 deb 包。请使用 debian 系的发行版，例如 ubuntu" \
+        "若您使用的是 arch 系发行版，则建议使用 ${GREEN}paru${RESET} 等 ${BLUE}AUR helper${RESET} 来安装，而不是通过本工具来安装。"
+    case ${LINUX_DISTRO} in
+    debian) ;;
+    redhat) THE_LATEST_DEB_URL=$(printf '%s\n' "${THE_LATEST_DEB_URL}" | sed "s@${GREP_NAME}_@${GREP_NAME}-@" | sed "s@_amd64.deb@-1.x86_64.rpm@") ;;
+    esac
+
+    case ${ARCH_TYPE} in
+    amd64)
+        THE_LATEST_DEB_FILE=$(printf '%s\n' "${THE_LATEST_DEB_URL}" | awk -F '/' '{print $NF}')
+        THE_LATEST_DEB_VERSION=$(printf '%s\n' "${THE_LATEST_DEB_FILE}" | sed 's@.deb@@' | sed "s@${GREP_NAME}-@@" | sed "s@${GREP_NAME}_@@")
+        ;;
+    arm64)
+        THE_LATEST_DEB_FILE="yozo-office_8.0.1322.191ZH.SY01.S1_arm64.deb"
+        THE_LATEST_DEB_VERSION="8.0.1322.191zh.s1_arm64"
+        ;;
+    *) ;;
+    esac
+
+    ICON_FILE='/usr/share/icons/hicolor/48x48/apps/yozoicon.png'
+    if [ -e "${ICON_FILE}" ]; then
+        catimg "${ICON_FILE}" 2>/dev/null
+    fi
+    check_deb_version
+
+    printf "%s\n" \
+        "根据 2022年3月份修订的 TMOE LICENSE v1.2, 您需要再次了解并同意以下内容。" \
+        '7. 关于商业软件的说明
+中华人民共和国境内的企业生产的部分商业软件使用了私有协议，并且受《中华人民共和国著作权法》保护。
+您在使用本软件及其相关项目时，在安装相关商业软件前，必须了解并同意以下协议。
+(a)根据《中华人民共和国计算机软件保护条例》第十七条规定：“为了学习和研究软件内含的设计思想和原理，通过安装、显示、传输或者存储软件等方式使用软件的，可以不经软件著作权人许可，不向其支付报酬”。
+(b)本软件及其相关项目附带的商业软件来自互联网（包括但不限于优麒麟、银河麒麟和统信的软件仓库），这些商业软件仅用来测试（包括但不限于测试其在arm64等特定架构、特定容器环境的兼容性，测试研究软件机制和原理），本软件开发者未授权任何机构和个人用于商业用途。请严格遵守法律规定，在测试后24小时内完全卸载相关软件，并彻底销毁。开发者将不对传播这些软件所产生的任何后果负责，也不对您使用相关软件所进行的任何行为负责。
+(c)非特殊情况下，请不要给开发者打赏。如需打赏，则表示您已经同意了这种行为与相关商业软件毫无关系。
+(d)若本软件及其相关项目侵害了您的权益，请及时与开发者联系，开发者将删除相关内容。
+
+8. 使用说明
+(a)您有权选择接受或拒绝使用本软件或本软件相关的项目。
+(b)若您不同意本协议及其附加协议，则建议您卸载掉本软件及其相关项目，并彻底销毁。
+(c)本软件及其相关项目服务于全球各地，您在使用期间必须要遵守当地的法规。
+(d)若本协议及其附加协议与您所在地的法律或法规冲突，则请您卸载掉本软件及其相关项目，并彻底销毁，同时开发者将不承担任何责任。
+You shall remove the software and its related projects if this agreement and any extra agreements violate with the laws or regulations of your location, and the developer will not be accountable.'
+
+    case ${ARCH_TYPE} in
+    amd64) ;;
+    arm64) THE_LATEST_DEB_URL="https://l.tmoe.me/yozo-office-arm64" ;;
+    *) arch_does_not_support ;;
+    esac
+    #printf "%s\n" "最新版链接为${BLUE}${THE_LATEST_DEB_URL}${RESET}"
+    download_and_install_deb
+}
+###################
+make_font_cache() {
+    for i in mkfontscale mkfontdir fc-cache; do
+        [[ ! $(command -v ${i}) ]] || ${i}
+    done
+}
+###############
+install_wps_office() {
+    random_neko
+    DEPENDENCY_01="wps-office"
+    DEPENDENCY_02=""
+    printf "%s\n" "正在检测版本更新..."
+    printf "%s\n" "若安装失败，则请前往官网手动下载安装。"
+    printf "%s\n" "url: ${YELLOW}https://linux.wps.cn${RESET}"
+    case ${LINUX_DISTRO} in
+    redhat)
+        THE_LATEST_DEB_URL=$(curl -L https://linux.wps.cn/ | grep '\.rpm' | grep -i "$(uname -m)" | head -n 1 | cut -d '=' -f 2 | cut -d '"' -f 2)
+        ;;
+    *)
+        THE_LATEST_DEB_URL=$(curl -L https://linux.wps.cn/ | grep '\.deb' | grep -i "${ARCH_TYPE}" | head -n 1 | cut -d '=' -f 2 | cut -d '"' -f 2)
+        ;;
+    esac
+    THE_LATEST_DEB_VERSION=$(printf '%s\n' "${THE_LATEST_DEB_URL}" | awk -F '/' '{print $NF}' | sed 's@.deb@@')
+    TMOE_TIPS_01="检测到最新版本为${THE_LATEST_DEB_VERSION}"
+    lolcat_tmoe_tips_01
+    printf "%s\n" "最新版链接为${BLUE}${THE_LATEST_DEB_URL}${RESET}"
+    if [ ! -e "${APPS_LNK_DIR}/wps-office-wps.desktop" ]; then
+        #press_enter_to_reinstall
+        printf "%s\n" "未检测到本地版本，您可能尚未安装WPS客户端。"
+    elif [ -e "${TMOE_LINUX_DIR}/${DEPENDENCY_01}-version" ]; then
+        printf "%s\n" "本地版本可能为${YELLOW}$(head -n 1 ${TMOE_LINUX_DIR}/${DEPENDENCY_01}-version)${RESET}"
+        printf "%s\n" "如需${RED}卸载${RESET}，请手动输${BLUE} ${TMOE_REMOVAL_COMMAND} ${DEPENDENCY_01} ${DEPENDENCY_02} ${RESET}"
+    else
+        printf "%s\n" "未检测到本地版本，您可能不是通过tmoe tools安装的。"
+    fi
+    do_you_want_to_continue
+    cd /tmp
+    if [ ! -e "/usr/share/fonts/truetype/wps-fonts/wingding.ttf" ]; then
+        aria2c --console-log-level=warn --no-conf --allow-overwrite=true -s 5 -x 5 -k 1M -d /tmp -o ttf-wps-fonts.tar.xz https://gitee.com/ak2/ttf-wps-fonts/raw/master/ttf-wps-fonts.tar.xz
+        tar -Jxvf /tmp/ttf-wps-fonts.tar.xz -C /
+        rm -fv /tmp/ttf-wps-fonts.tar.xz
+        cd /usr/share/fonts/truetype/wps-fonts
+        make_font_cache
+        cd /tmp
+    fi
+
+    if [ ! -e "/usr/share/fonts/truetype/msttcorefonts/Impact.ttf" ]; then
+        git clone --depth=1 https://gitee.com/ak2/msttcorefonts.git /tmp/.MS_FONTS_TEMP_FOLDER
+        cd /tmp/.MS_FONTS_TEMP_FOLDER
+        tar -JPxvf msttcorefonts.tar.xz
+        cd /usr/share/fonts/truetype/msttcorefonts
+        make_font_cache
+        cd /tmp
+        rm -rvf .MS_FONTS_TEMP_FOLDER 2>/dev/null
+    fi
+
+    for i in /tmp ${HOME}/sd/Download; do
+        [[ ! -d ${i} ]] || DEB_DIR=${i}
+    done
+    cd ${DEB_DIR}
+    case "${LINUX_DISTRO}" in
+    "debian")
+        dpkg --configure -a
+        if [ ! -e "/usr/share/doc/ttf-mscorefonts-installer/copyright" ]; then
+            printf "%s\n" "apt install -y ttf-mscorefonts-installer"
+            apt install -y ttf-mscorefonts-installer
+        fi
+        aria2c --console-log-level=warn --no-conf --allow-overwrite=true --check-certificate=false -s 5 -x 5 -k 1M -o WPSoffice.deb "${THE_LATEST_DEB_URL}"
+        apt-cache show ./WPSoffice.deb
+        apt install -y ./WPSoffice.deb || dpkg -i ./WPSoffice.deb
+        printf "%s\n" "You can type ${RED}rm -fv ${BLUE}${DEB_DIR}/WPSoffice.deb${RESET} to delete the deb file."
+        ;;
+    "arch")
+        DEPENDENCY_01="wps-office-cn"
+        beta_features_quick_install
+        ;;
+    "redhat")
+        aria2c --console-log-level=warn --no-conf --allow-overwrite=true -s 5 -x 5 -k 1M -o WPSoffice.rpm "${THE_LATEST_DEB_URL}"
+        yum install -y ./WPSoffice.rpm
+        printf "%s\n" "You can type ${RED}rm -fv ${BLUE}${DEB_DIR}/WPSoffice.rpm${RESET} to delete the rpm file."
+        ;;
+    esac
+    printf "%s\n" "${THE_LATEST_DEB_VERSION}" >${TMOE_LINUX_DIR}/${DEPENDENCY_01}-version
+    #rm -fv ./WPSoffice.deb ./WPSoffice.rpm 2>/dev/null
+    beta_features_install_completed
+}
+###################
+install_libre_office() {
+    #ps -e >/dev/null || printf "%s\n" "/proc分区未挂载，请勿安装libreoffice,赋予proot容器真实root权限可解决相关问题，但强烈不推荐！"
+    case ${TMOE_PROOT} in
+    no)
+        printf "%s\n" "${RED}WARNING！${RESET}检测到您无权读取${GREEN}/proc${RESET}的某些数据！"
+        printf "%s\n" "本工具将为此软件自动打补丁以解决无法运行的问题，但无法保证补丁有效。"
+        ;;
+    esac
+    #RETURN_TO_WHERE='software_center'
+    #do_you_want_to_continue
+    case "${LINUX_DISTRO}" in
+    "debian") DEPENDENCY_01='--no-install-recommends libreoffice' ;;
+    *) DEPENDENCY_01="libreoffice" ;;
+    esac
+    DEPENDENCY_02="libreoffice-l10n-zh-cn libreoffice-gtk3"
+
+    beta_features_quick_install
+    case "${TMOE_PROOT}" in
+    no)
+        patch_libreoffice
+        printf "%s\n" "打补丁完成"
+        ;;
+    esac
+}
+###################
+patch_libreoffice() {
+    mkdir -pv /prod/version
+    cd /usr/lib/libreoffice/program
+    rm -f oosplash
+    curl -Lo 'oosplash' https://gitee.com/mo2/patch/raw/libreoffice/oosplash
+    chmod a+rx oosplash
+}
+##################
+check_libreoffice_patch() {
+    if [ $(command -v libreoffice) ]; then
+        patch_libreoffice
+    fi
+}
+############
+tmoe_documents_menu

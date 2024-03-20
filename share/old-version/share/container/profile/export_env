@@ -1,0 +1,22 @@
+mkdir -p /etc/zsh /etc/profile.d/permanent
+touch /usr/local/etc/tmoe-linux/environment/container.env
+chmod a+rx /usr/local/etc/tmoe-linux/environment/container.env
+
+export_to_zshenv() {
+    if [ ! -e /etc/zsh/zshenv ]; then
+        cp /tmp/profile/zshenv /etc/zsh
+    elif ! grep -q 'environment/container.env' /etc/zsh/zshenv; then
+        printf "%s\n" "[[ ! -r /usr/local/etc/tmoe-linux/environment/container.env ]] || source /usr/local/etc/tmoe-linux/environment/container.env" >>/etc/zsh/zshenv
+    fi
+}
+export_to_zlogin() {
+    if [ ! -e /etc/zsh/zlogin ]; then
+        cp /tmp/profile/zlogin /etc/zsh
+    elif ! grep -q 'environment/login' /etc/zsh/zlogin; then
+        printf "%s\n" "[[ ! -r /usr/local/etc/tmoe-linux/environment/login ]] || source /usr/local/etc/tmoe-linux/environment/login" >>/etc/zsh/zlogin
+    fi
+}
+ln -svf /usr/local/etc/tmoe-linux/environment/container.env /etc/profile.d/000_env.sh
+ln -svf /usr/local/etc/tmoe-linux/environment/login /etc/profile.d/001_login.sh
+export_to_zshenv
+export_to_zlogin

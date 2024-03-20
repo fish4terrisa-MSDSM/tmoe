@@ -1,0 +1,1879 @@
+#!/usr/bin/env bash
+#######################
+tmoe_qemu_main() {
+    case "$1" in
+    -m | * | -x64qemu)
+        check_qemu_installation
+        tmoe_qemu_main_menu
+        ;;
+    esac
+}
+#############################
+tmoe_qemu_main_menu() {
+    RETURN_TO_WHERE='tmoe_qemu_main_menu'
+    RETURN_TO_MENU='tmoe_qemu_main_menu'
+    QEMU_DIR="${TMOE_LINUX_DIR}/qemu/list"
+    [[ -e ${QEMU_DIR} ]] || mkdir -pv ${QEMU_DIR}
+    cd ${QEMU_DIR}
+    let i=02
+    for CLIST in $(ls .); do
+        if [[ -s ${CLIST} && ! -d ${CLIST} ]]; then
+            printf "%s %s " "${CLIST}" "$((i++))" >>${TMPDIR}/.tmoe-linux_cache.01
+        fi
+    done
+    #%s后有空格
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "qemu-system vm" --menu "qemu-system virtual machine" 0 50 0 \
+            "🍹 create a new VM 新建虚拟机" "1" \
+            $(sed -n p ${TMPDIR}/.tmoe-linux_cache.01 2>/dev/null) \
+            "Back" "🌚 返回" \
+            3>&1 1>&2 2>&3
+    )
+    rm -f ${TMPDIR}/.tmoe-linux_cache.01 2>/dev/null
+    #"10" "🖱 Input devices输入设备" \
+    #"🏭 Upgrade 升级qemu bin" "2" \	*升级qemu*) upgrade_qemu_bin ;;
+    ##############🧺
+    case ${TMOE_VIRTUALIZATION} in
+    Back | "") install_container_and_virtual_machine ;;
+    *新建虚拟机) create_a_new_tmoe_qemu_vm ;;
+    *)
+        #echo $TMOE_VIRTUALIZATION
+        QEMU_VM_NAME="${TMOE_VIRTUALIZATION}"
+        QEMU_FILE="${QEMU_DIR}/${QEMU_VM_NAME}"
+        start_tmoe_qemu_manager
+        ;;
+    esac
+    ###############
+    press_enter_to_return
+    #${RETURN_TO_WHERE}
+    tmoe_qemu_main_menu
+}
+start_tmoe_qemu_manager() {
+    RETURN_TO_WHERE='start_tmoe_qemu_manager'
+    RETURN_TO_MENU='start_tmoe_qemu_manager'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "输startqemu启动${QEMU_VM_NAME}" --menu "${QEMU_VM_NAME} virtual machine tmoe manager.\n本工具仅支持qemu5.x/6.x" 0 50 0 \
+            "1" "🍹 Start 启动${QEMU_VM_NAME}" \
+            "2" "🥗 Edit config 编辑配置" \
+            "3" "💾 Disk manager磁盘管理器" \
+            "4" "📺 Display & audio显示与音频" \
+            "5" "🍭 CPU & RAM 中央处理器与内存管理" \
+            "6" "🥅 Network 网络设定" \
+            "7" "😋 Extra options额外选项" \
+            "8" "del conf 删除${QEMU_VM_NAME}配置" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #"10" "🖱 Input devices输入设备" \
+    #"3" "🍱 Multi-VM多虚拟机管理" \
+    #"11" "🔌 uefi/legacy bios(开机引导固件)" \
+    #"8" "🔌 Del 删除" \
+    ##############🧺
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") tmoe_qemu_main_menu ;;
+    1) start_qemu_vm ;;
+    2) edit_qemu_script ;;
+    3) tmoe_qemu_disk_manager ;;
+    4) tmoe_qemu_display_settings ;;
+    5) tmoe_qemu_x64_cpu_manager ;;
+    6) modify_tmoe_qemu_network_settings ;;
+    7) modify_tmoe_qemu_extra_options ;;
+    8) delete_current_qemu_vm_conf ;;
+    esac
+    ###############
+    press_enter_to_return
+    ${RETURN_TO_WHERE}
+}
+##############
+start_qemu_vm() {
+    bash ${QEMU_FILE}
+}
+edit_qemu_script() {
+    if [ $(command -v editor) ]; then
+        editor ${QEMU_FILE}
+    else
+        nano ${QEMU_FILE}
+    fi
+}
+##############
+#新建---选择virtio/sata----选择磁盘-----架构---UEFI/BIOS---访问方式---转发端口
+create_a_new_tmoe_qemu_vm() {
+    save_current_qemu_conf_as_a_new_script
+    choose_qemu_qcow2_disk_type
+    RETURN_TO_WHERE='choose_qemu_qcow2_or_img_file'
+    FILE_EXT_01='qcow2'
+    FILE_EXT_02='*'
+    if (whiptail --title "选择或新建虚拟磁盘" --yes-button 'choose选择' --no-button 'creat新建' --yesno "Choose a qcow2 file or create a new disk?\n若您无虚拟磁盘，那就新建一个吧" 8 50); then
+        choose_qemu_qcow2_or_img_file
+    else
+        create_blank_virtual_disk_image
+    fi
+    press_enter_to_continue
+    SELECTION=""
+    RETURN_TO_WHERE='choose_your_qemu_arch'
+    if (whiptail --title "是否需要选择启动光盘" --yes-button 'yes' --no-button 'skip跳过' --yesno "Do you want to choose a iso?\n启动光盘用于安装系统,若您无此文件,则请先下载iso;\n若磁盘内已安装了系统,则可跳过此选项。" 10 50); then
+        BLK_DEVICE='CD_ROM_DISK_01'
+        FILE_EXT_01='iso'
+        FILE_EXT_02='ISO'
+        choose_qemu_qcow2_or_img_file
+        press_enter_to_continue
+    fi
+    choose_your_qemu_arch
+    choose_qemu_machine_type
+    choose_uefi_or_bios
+    RETURN_TO_WHERE='do_you_want_to_enable_tcp_port_fwd'
+    choose_qemu_connection_type
+    do_you_want_to_enable_tcp_port_fwd
+    do_you_want_to_link_this_script
+    printf "%s\n" "处于${BLUE}默认配置${RESET}下的虚拟机的启动命令始终为${GREEN}startqemu${RESET}"
+    printf "%s\n" "是否需要启动虚拟机？"
+    printf "%s\n" "您之后可以输${GREEN}startqemu${RESET}来启动"
+    printf "%s\n" "You can type ${GREEN}startqemu${RESET} to start the default qemu vm."
+    printf "%s\n" "Do you want to start it now?${PURPLE}[Y/n]${RESET}"
+    RETURN_TO_WHERE='start_tmoe_qemu_manager'
+    do_you_want_to_continue
+    bash ${QEMU_FILE}
+}
+##########################
+do_you_want_to_enable_tcp_port_fwd() {
+    if (whiptail --title "TCP PORT FORWORD" --yes-button 'yes' --no-button 'no' --yesno "Do you want to enable the tcp port fwd function?\n是否需要开启tcp端口转发功能?默认将guest的22端口转发至host的2888,将39080转发至39081\n您可以在network配置选项中手动修改转发规则。" 12 50); then
+        TCP_PORT_HOST_FWD_01_ENABLED=true
+    else
+        TCP_PORT_HOST_FWD_01_ENABLED=false
+    fi
+    sed -E -i "s@^(TCP_PORT_HOST_FWD_01_ENABLED=).*@\1${TCP_PORT_HOST_FWD_01_ENABLED}@g" ${QEMU_FILE}
+    grep --color=auto "^TCP_PORT_HOST_FWD_01_ENABLED=" ${QEMU_FILE}
+}
+###########################
+choose_your_qemu_arch() {
+    CURRENT_VALUE=$(grep '^QEMU_BIN_ARCH=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    if (whiptail --title "请选择qemu虚拟机架构" --yes-button 'x86_64' --no-button 'i386' --yesno "If your guest is 64bit,then choose x86_64\n若您需要运行x64系统,则请选择x86_64;\n若需运行32位x86 OS,则请选择i386.当前为${CURRENT_VALUE}" 10 50); then
+        QEMU_BIN_ARCH='x86_64'
+    else
+        QEMU_BIN_ARCH='i386'
+    fi
+    sed -E -i "s@^(QEMU_BIN_ARCH=).*@\1${QEMU_BIN_ARCH}@g" ${QEMU_FILE}
+    grep --color=auto "^QEMU_BIN_ARCH=" ${QEMU_FILE}
+}
+choose_qemu_machine_type() {
+    CURRENT_VALUE=$(grep '^MACHINE_TYPE=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    if (whiptail --title "请选择qemu机器类型" --yes-button 'i440fx(1996)' --no-button 'q35(2009)' --yesno "If you are using arch/debian-sid/win8.1/win10,then choose q35.\n若您使用的是旧系统,则选择pc-i440fx;否则请选择q35.当前为${CURRENT_VALUE}" 10 50); then
+        MACHINE_TYPE='pc'
+    else
+        MACHINE_TYPE='q35'
+    fi
+    sed -E -i "s@^(MACHINE_TYPE=).*@\1${MACHINE_TYPE}@g" ${QEMU_FILE}
+    grep --color=auto "^MACHINE_TYPE=" ${QEMU_FILE}
+}
+choose_uefi_or_bios() {
+    if (whiptail --title "请选择引导类型" --yes-button 'legacy bios' --no-button 'uefi' --yesno "If your guest is win95/winxp,then choose legacy bios.\n默认为legacy bios,若您的虚拟机非老旧系统,\n例如debian sid或win10,则可选择uefi\n若TianoCore UEFI无法引导系统,则请切换回bios\n若你使用的是未包含efi引导的镜像,则请使用legacy" 14 50); then
+        UEFI_ENABLED=false
+    else
+        UEFI_ENABLED=true
+    fi
+    sed -E -i "s@^(UEFI_ENABLED=).*@\1${UEFI_ENABLED}@g" ${QEMU_FILE}
+    grep --color=auto "^UEFI_ENABLED=" ${QEMU_FILE}
+}
+choose_qemu_connection_type() {
+    #此处不包含RETURN_TO_WHERE变量
+    unset CONNECTION_TYPE
+    TMOE_OPTION=$(whiptail --title "请选择连接类型" --menu "The default connection type is VNC.\n通过远程或本地桌面来显示qemu的界面" 0 50 0 \
+        "1" "vnc" \
+        "2" "x11/wayland(本地显示GUI)" \
+        "3" "remote-x11(远程x11,转发x)" \
+        "4" "spice" \
+        "0" "🌚 back 返回" \
+        3>&1 1>&2 2>&3)
+    ##############🧺
+    case ${TMOE_OPTION} in
+    "" | 0) ${RETURN_TO_WHERE} ;;
+    1)
+        CONNECTION_TYPE='vnc'
+        tmoe_qemu_vnc_menu
+        ;;
+    2) CONNECTION_TYPE='x11' ;;
+    3)
+        CONNECTION_TYPE='remote-x11'
+        choose_qemu_x11_addr
+        ;;
+    4)
+        CONNECTION_TYPE='spice'
+        choose_qemu_vnc_port
+        ;;
+    esac
+    ###############
+    case ${CONNECTION_TYPE} in
+    "") ;;
+    *)
+        sed -E -i "s@^(CONNECTION_TYPE=).*@\1${CONNECTION_TYPE}@g" ${QEMU_FILE}
+        grep --color=auto "^CONNECTION_TYPE=" ${QEMU_FILE}
+        ;;
+    esac
+}
+##################
+tmoe_qemu_vnc_menu() {
+    TMOE_OPTION=$(whiptail --title "CONFIGURE VNC" --menu "You can modify the VNC configuration here" 0 50 0 \
+        "1" "port端口" \
+        "2" "localhost/LAN(本机/局域网访问)" \
+        "0" "🌚 back 返回" \
+        3>&1 1>&2 2>&3)
+    ##############🧺
+    case ${TMOE_OPTION} in
+    "" | 0) choose_qemu_connection_type ;;
+    1) choose_qemu_vnc_port ;;
+    2) tmoe_qemu_vnc_localhost ;;
+    esac
+}
+###################
+tmoe_qemu_vnc_localhost() {
+    CURRENT_VALUE=$(grep '^VNC_LOCALHOST=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    if (whiptail --title "localhost vnc" --yes-button 'true' --no-button 'false' --yesno "是否仅允许本机访问?默认为true,当前为${CURRENT_VALUE}\nDo you only allow localhost to access vnc?" 9 50); then
+        VNC_LOCALHOST=true
+    else
+        VNC_LOCALHOST=false
+    fi
+    sed -E -i "s@^(VNC_LOCALHOST=).*@\1${VNC_LOCALHOST}@g" ${QEMU_FILE}
+    grep --color=auto "^VNC_LOCALHOST=" ${QEMU_FILE}
+}
+###################
+choose_qemu_x11_addr() {
+    unset REMOTE_X11_ADDR
+    CURRENT_IP=$(ip -4 -br a | awk '{print $NF}' | grep '192\.168\.' | cut -d '/' -f 1 | head -n 1)
+    [[ -n ${CURRENT_IP} ]] || CURRENT_IP=$(ip -4 -br -c a | awk '{print $NF}' | grep -v '127\.0\.0\.1' | grep '172\.' | cut -d '/' -f 1 | head -n 1)
+    [[ -n ${CURRENT_IP} ]] || CURRENT_IP="192.168.1.2"
+    TMOE_OPTION=$(whiptail --title "请选择x11转发地址" --menu "The default addr is 127.0.0.1:0" 0 50 0 \
+        "1" "127.0.0.1:0" \
+        "2" "127.0.0.1:1" \
+        "3" "${CURRENT_IP}:0" \
+        "4" "customize 自定义" \
+        "0" "🌚 back 返回" \
+        3>&1 1>&2 2>&3)
+    ##############🧺
+    case ${TMOE_OPTION} in
+    "" | 0) choose_qemu_connection_type ;;
+    1) REMOTE_X11_ADDR='127.0.0.1:0' ;;
+    2) REMOTE_X11_ADDR='127.0.0.1:1' ;;
+    3) REMOTE_X11_ADDR="${CURRENT_IP}:0" ;;
+    4) type_the_remote_x11_addr ;;
+    esac
+    ###############
+    case ${REMOTE_X11_ADDR} in
+    "") ;;
+    *)
+        sed -E -i "s@^(REMOTE_X11_ADDR=).*@\1${REMOTE_X11_ADDR}@g" ${QEMU_FILE}
+        grep --color=auto "^REMOTE_X11_ADDR=" ${QEMU_FILE}
+        ;;
+    esac
+}
+#################
+type_the_remote_x11_addr() {
+    REMOTE_X11_ADDR=$(whiptail --inputbox "请输入转发地址,默认为127.0.0.1:0\nPlease type the addr." 9 50 --title "ADDR" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        #${RETURN_TO_WHERE}
+        choose_qemu_x11_addr
+    elif [[ ! ${REMOTE_X11_ADDR} =~ ^([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5]):[0-9]{1,5}$ ]]; then
+        printf "${PURPLE}%s${RESET}\n" "${REMOTE_X11_ADDR}"
+        printf "%s\n" "您输入的地址无效,请重新输入"
+        printf "%s\n" "Please re-enter."
+        press_enter_to_return
+        type_the_remote_x11_addr
+    elif [ -z "${REMOTE_X11_ADDR}" ]; then
+        printf "%s\n" "The addr is empty."
+        printf "%s\n" "地址为空，将自动切换至${GREEN}127.0.0.1:0${RESET}"
+        REMOTE_X11_ADDR='127.0.0.1:0'
+    fi
+}
+#################
+choose_qemu_vnc_port() {
+    CURRENT_VNC_PORT=$(grep "^VNC_PORT=" ${QEMU_FILE} | cut -d '=' -f 2)
+    unset VNC_PORT
+    TMOE_OPTION=$(whiptail --title "请选择${CONNECTION_TYPE}端口" --menu "The current ${CONNECTION_TYPE} port is ${CURRENT_VNC_PORT}.\n默认端口5905,当前为${CURRENT_VNC_PORT}" 0 50 0 \
+        "1" "5900" \
+        "2" "5901" \
+        "3" "5902" \
+        "4" "5903" \
+        "5" "5904" \
+        "6" "customize 自定义" \
+        "0" "🌚 back 返回" \
+        3>&1 1>&2 2>&3)
+    ##############🧺
+    case ${TMOE_OPTION} in
+    "" | 0) choose_qemu_connection_type ;;
+    [1-5]) VNC_PORT=$((5899 + ${TMOE_OPTION})) ;;
+    6) type_the_vnc_port_target ;;
+    esac
+    ###############
+    case ${VNC_PORT} in
+    "") ;;
+    *)
+        sed -E -i "s@^(VNC_PORT=).*@\1${VNC_PORT}@g" ${QEMU_FILE}
+        grep --color=auto "^VNC_PORT=" ${QEMU_FILE}
+        ;;
+    esac
+}
+#################
+type_the_vnc_port_target() {
+    VNC_PORT=$(whiptail --inputbox "请输入端口号(纯数字),默认为5905\nPlease type the port" 9 50 --title "PORT" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        #${RETURN_TO_WHERE}
+        choose_qemu_vnc_port
+    elif [[ ! ${VNC_PORT} =~ ^[0-9]+$ ]]; then
+        printf "%s\n" "端口号仅包含数字,请勿输入特殊字符。"
+        printf "%s\n" "Please re-enter."
+        press_enter_to_return
+        type_the_vnc_port_target
+    elif [ -z "${VNC_PORT}" ]; then
+        printf "%s\n" "The vnc port is empty."
+        printf "%s\n" "端口为空，将自动切换至${GREEN}5905${RESET}端口"
+        VNC_PORT='5905'
+    fi
+}
+do_you_want_to_link_this_script() {
+    [[ ! -e $(command -v startqemu) ]] || rm -fv $(command -v startqemu)
+    ln -svf ${QEMU_FILE} /usr/local/bin/startqemu
+    if (whiptail --title "Do you want to link this script to your HOME dir" --yes-button 'yes' --no-button 'no' --yesno "是否需要在${HOME}目录下生成启动脚本(软链接),若选yes,则可通过~/${QEMU_VM_NAME}来启动虚拟机" 9 50); then
+        ln -svf ${QEMU_FILE} ${HOME}
+        printf "%s\n" "您可以输${GREEN}~/${QEMU_VM_NAME}${RESET}来启动当前虚拟机。"
+        printf "%s\n" "You can type ${GREEN}~/${QEMU_VM_NAME}${RESET} to start current qemu vm."
+    fi
+}
+#########################
+save_current_qemu_conf_as_a_new_script() {
+    QEMU_VM_NAME=$(whiptail --inputbox "请输入虚拟机名称,不含空格和特殊字符,\n若留空则将自动命名为gnu-linux_x64-$(date +%Y-%m-%d_%H-%M)。Please type the VM name." 10 50 --title "VM NAME" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        ${RETURN_TO_MENU}
+    elif [ -z "${QEMU_VM_NAME}" ]; then
+        QEMU_VM_NAME="gnu-linux_x64-$(date +%Y-%m-%d_%H-%M)"
+        printf "%s\n" "Your qemu vm name is empty."
+        printf "%s\n" "名称为空，将自动生成虚拟机名称:${GREEN}${QEMU_VM_NAME}${RESET}"
+    elif [[ -e ${QEMU_DIR}/${QEMU_VM_NAME} ]]; then
+        printf "%s\n" "文件已被占用，请重新输入"
+        printf "%s\n" "Please re-enter."
+        press_enter_to_return
+        save_current_qemu_conf_as_a_new_script
+    elif [[ ! ${QEMU_VM_NAME} =~ ^[0-9A-Za-z_-]+$ ]]; then
+        printf "%s\n" "虚拟机名称仅包含英文、数字和_-,请勿输入特殊字符。"
+        printf "%s\n" "Please re-enter."
+        press_enter_to_return
+        save_current_qemu_conf_as_a_new_script
+    fi
+    QEMU_FILE="${QEMU_DIR}/${QEMU_VM_NAME}"
+    cp -vf ${TMOE_TOOL_DIR}/virtualization/qemu/startqemu ${QEMU_FILE}
+    chmod -v 777 ${QEMU_FILE}
+    sed -E -i "s@^(QEMU_NAME=).*@\1${QEMU_VM_NAME}@g" ${QEMU_FILE}
+    grep --color=auto "^QEMU_NAME=" ${QEMU_FILE}
+}
+################
+fix_qemu_vdisk_file_perssions() {
+    if [ ${HOME} != '/root' ]; then
+        printf "%s\n" "正在将${TMOE_FILE_ABSOLUTE_PATH%/*}的文件权限修改为${CURRENT_USER_NAME}用户和${CURRENT_USER_GROUP}用户组"
+        #chown -v ${CURRENT_USER_NAME}:${CURRENT_USER_GROUP} ${TARGET_FILE_NAME}
+        chown -Rv ${CURRENT_USER_NAME}:${CURRENT_USER_GROUP} "${TMOE_FILE_ABSOLUTE_PATH%/*}"
+    fi
+}
+choose_qemu_qcow2_disk_type() {
+    if (whiptail --title "请选择磁盘设备类型" --yes-button 'sata' --no-button 'virtio-blk' --yesno "If your guest is linux,then choose virtio.\n若虚拟机系统未安装virtio驱动,则请选择sata" 9 50); then
+        BLK_DEVICE="SATA_DISK_01"
+    else
+        BLK_DEVICE="VIRTIO_DISK_01"
+    fi
+}
+################
+create_blank_virtual_disk_image() {
+    [[ -n ${QEMU_VM_NAME} ]] || QEMU_VM_NAME="gnu-linux_x64-$(date +%Y-%m-%d_%H-%M)"
+    DISK_FILE_PATH="${HOME}/sd/Download/qemu"
+    TARGET_FILE_NAME=$(whiptail --inputbox "请输入磁盘文件名称,若留空,则将自动创建${QEMU_VM_NAME}\nPlease type the filename." 10 50 --title "FILENAME" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        ${RETURN_TO_WHERE}
+    elif [ -z "${TARGET_FILE_NAME}" ]; then
+        TARGET_FILE_NAME="${QEMU_VM_NAME}.qcow2"
+        if [[ -e ${DISK_FILE_PATH}/${QEMU_VM_NAME} ]]; then
+            printf "%s\n" "文件已存在，新文件将被重命名为${QEMU_VM_NAME}_02"
+            press_enter_to_continue
+            TARGET_FILE_NAME="${QEMU_VM_NAME}_02.qcow2"
+        fi
+    elif [[ ! ${TARGET_FILE_NAME} =~ ^[0-9A-Za-z_-]+$ ]]; then
+        printf "%s\n" "磁盘名称仅包含英文、数字和_-,请勿输入特殊字符。"
+        printf "%s\n" "Please re-enter."
+        press_enter_to_return
+        create_blank_virtual_disk_image
+    elif [[ -e ${DISK_FILE_PATH}/${TARGET_FILE_NAME} ]]; then
+        printf "%s\n" "文件已存在，新文件将被重命名为${TARGET_FILE_NAME}_02"
+        press_enter_to_continue
+        TARGET_FILE_NAME="${TARGET_FILE_NAME}_02.qcow2"
+    else
+        TARGET_FILE_NAME="${TARGET_FILE_NAME}.qcow2"
+    fi
+    [[ -e ${DISK_FILE_PATH} ]] || mkdir -pv ${DISK_FILE_PATH}
+    cd ${DISK_FILE_PATH}
+    TMOE_FILE_ABSOLUTE_PATH="${DISK_FILE_PATH}/${TARGET_FILE_NAME}"
+    TARGET_FILE_SIZE=$(whiptail --inputbox "请设定磁盘空间大小,例如512M,16G,128G或1T\n若留空则将自动创建16G的磁盘,Please type the disk size." 10 50 --title "SIZE" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        qemu-img create -f qcow2 ${TARGET_FILE_NAME} 16G
+    elif [ -z "${TARGET_FILE_SIZE}" ]; then
+        printf "%s\n" "The default disk size is 16G."
+        printf "%s\n" "您未输入磁盘空间大小，将为您自动创建16G大小的qcow2磁盘"
+        do_you_want_to_continue
+        #qemu-img create -f qcow2 -o preallocation=metadata ${TARGET_FILE_NAME} 16G
+        qemu-img create -f qcow2 ${TARGET_FILE_NAME} 16G
+    else
+        qemu-img create -f qcow2 ${TARGET_FILE_NAME} ${TARGET_FILE_SIZE}
+    fi
+    fix_qemu_vdisk_file_perssions
+    stat ${TARGET_FILE_NAME}
+    qemu-img info ${TARGET_FILE_NAME}
+    ls -lh ${DISK_FILE_PATH}/${TARGET_FILE_NAME}
+    #printf "%s\n" "是否需要将其设置为默认磁盘？"
+    #printf "%s\n" "Do you need to set it as the default disk?"
+    #do_you_want_to_continue
+    sed -E -i "s@^(${BLK_DEVICE}=).*@\1"${TMOE_FILE_ABSOLUTE_PATH}"@g;s@^(${BLK_DEVICE}_ENABLED=).*@\1true@g" ${QEMU_FILE}
+    grep -E --color=auto "^${BLK_DEVICE}_ENABLED=|^${BLK_DEVICE}_FORMAT=|^${BLK_DEVICE}=" ${QEMU_FILE}
+}
+################
+choose_qemu_qcow2_or_img_file() {
+    if grep -q "^${BLK_DEVICE}_ENABLED=.*true" ${QEMU_FILE}; then
+        CURRENT_QEMU_ISO=$(grep "^${BLK_DEVICE}=" ${QEMU_FILE} | head -n 1 | awk -F '=' '{print $2}')
+        IMPORTANT_TIPS="您当前已加载的虚拟磁盘为${CURRENT_QEMU_ISO}"
+    else
+        IMPORTANT_TIPS="磁盘文件路径请不要包含空格,您当前未加载虚拟磁盘"
+    fi
+    where_is_tmoe_file_dir
+
+    if [ -z ${SELECTION} ]; then
+        printf "%s\n" "没有指定${YELLOW}有效${RESET}的${BLUE}文件${GREEN}，请${GREEN}重新${RESET}选择"
+    else
+        printf "%s\n" "您选择的文件为${TMOE_FILE_ABSOLUTE_PATH}"
+        qemu-img info "${TMOE_FILE_ABSOLUTE_PATH}"
+        qemu-img check "${TMOE_FILE_ABSOLUTE_PATH}"
+        ls -lah "${TMOE_FILE_ABSOLUTE_PATH}"
+        sed -E -i "s@^(${BLK_DEVICE}=).*@\1"${TMOE_FILE_ABSOLUTE_PATH}"@g;s@^(${BLK_DEVICE}_ENABLED=).*@\1true@g" ${QEMU_FILE}
+        QEMU_DISK_FOEMAT=$(qemu-img info "${TMOE_FILE_ABSOLUTE_PATH}" 2>&1 | grep format | head -n 1 | awk '{print $NF}')
+        [[ -z ${QEMU_DISK_FOEMAT} ]] || sed -E -i "s@^(${BLK_DEVICE}_FORMAT=).*@\1${QEMU_DISK_FOEMAT}@g" ${QEMU_FILE}
+        grep -E --color=auto "^${BLK_DEVICE}_ENABLED=|^${BLK_DEVICE}_FORMAT=|^${BLK_DEVICE}=" ${QEMU_FILE}
+    fi
+}
+##########
+tmoe_qemu_disk_manager() {
+    RETURN_TO_WHERE='tmoe_qemu_disk_manager'
+    RETURN_TO_MENU='tmoe_qemu_disk_manager'
+    #15 50 7
+    FILE_EXT_01='qcow2'
+    FILE_EXT_02='*'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "DISK MANAGER" --menu "您想要选择哪块磁盘呢?" 0 0 0 \
+            "1" "sata-01(第一块sata磁盘)" \
+            "2" "cd-01(第一张光盘)" \
+            "3" "virtio driver(驱动盘)" \
+            "4" "virtio-01(第一块virtio磁盘)" \
+            "5" "usb-01(第一块usb移动硬盘)" \
+            "6" "floppy-01(第一张软盘)" \
+            "7" "virtio-9p(共享文件夹)" \
+            "8" "sata-02" \
+            "9" "cd-02" \
+            "10" "virtio-02" \
+            "11" "usb-02" \
+            "12" "floppy-02" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    #"12" "virtio-fs(共享文件夹)" \
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") start_tmoe_qemu_manager ;;
+    1) BLK_DEVICE='SATA_DISK_01' ;;
+    2) BLK_DEVICE='CD_ROM_DISK_01' ;;
+    3) BLK_DEVICE='CD_ROM_DISK_02' ;;
+    4) BLK_DEVICE='VIRTIO_DISK_01' ;;
+    5) BLK_DEVICE='USB_DISK_01' ;;
+    6) BLK_DEVICE='FLOPPY_DISK_01' ;;
+    7) BLK_DEVICE='VIRTIO_9P_PCI_01' ;;
+    8) BLK_DEVICE='SATA_DISK_02' ;;
+    9) BLK_DEVICE='CD_ROM_DISK_02' ;;
+    10) BLK_DEVICE='VIRTIO_DISK_02' ;;
+    11) BLK_DEVICE='USB_DISK_02' ;;
+    12) BLK_DEVICE='FLOPPY_DISK_02' ;;
+    esac
+    ###########
+    case ${TMOE_VIRTUALIZATION} in
+    3)
+        FILE_EXT_01='ISO'
+        FILE_EXT_02='iso'
+        tmoe_qemu_disk_manager_05
+        ;;
+    2 | 9)
+        FILE_EXT_01='ISO'
+        FILE_EXT_02='iso'
+        tmoe_qemu_disk_manager_03
+        ;;
+    6 | 12)
+        FILE_EXT_01='fd'
+        FILE_EXT_02='*'
+        tmoe_qemu_disk_manager_02
+        ;;
+    7) tmoe_qemu_disk_manager_04 ;;
+    *) tmoe_qemu_disk_manager_02 ;;
+    esac
+    press_enter_to_return
+    tmoe_qemu_disk_manager
+}
+tmoe_qemu_disk_manager_02() {
+    RETURN_TO_WHERE='tmoe_qemu_disk_manager_02'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "${BLK_DEVICE} MANAGER" --menu "您想要对${BLK_DEVICE}进行什么操作" 0 0 0 \
+            "1" "💽 choose a file 选择磁盘文件" \
+            "2" "create a new disk新建空白磁盘" \
+            "3" "disable 禁用${BLK_DEVICE}" \
+            "4" "compress 压缩(真实大小)" \
+            "5" "expand 扩容(最大空间)" \
+            "6" "bootindex 指定引导顺序" \
+            "7" "format 修改格式" \
+            "8" "delete 删除磁盘" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1) choose_qemu_qcow2_or_img_file ;;
+    2) create_blank_virtual_disk_image ;;
+    3) disable_qemu_disk ;;
+    4) compress_qcow2_img_file ;;
+    5) expand_qemu_qcow2_img_file ;;
+    6) modify_qemu_disk_bootindex ;;
+    7) modify_qemu_disk_format ;;
+    8) delete_current_qemu_vm_disk_file ;;
+    esac
+    press_enter_to_return
+    tmoe_qemu_disk_manager_02
+}
+tmoe_qemu_disk_manager_03() {
+    RETURN_TO_WHERE='tmoe_qemu_disk_manager_03'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "${BLK_DEVICE} MANAGER" --menu "您想要对${BLK_DEVICE}进行什么操作" 0 0 0 \
+            "1" "💽 choose a file 选择iso文件" \
+            "2" "disable 禁用${BLK_DEVICE}" \
+            "3" "bootindex 指定引导顺序" \
+            "4" "delete iso 删除光盘" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1) choose_qemu_qcow2_or_img_file ;;
+    2) disable_qemu_disk ;;
+    3) modify_qemu_disk_bootindex ;;
+    4) delete_current_qemu_vm_disk_file ;;
+    esac
+    press_enter_to_return
+    tmoe_qemu_disk_manager_03
+}
+tmoe_qemu_disk_manager_04() {
+    RETURN_TO_WHERE='tmoe_qemu_disk_manager_04'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "${BLK_DEVICE} MANAGER" --menu "您想要对${BLK_DEVICE}进行什么操作" 0 0 0 \
+            "1" "shared dir 修改共享文件夹" \
+            "2" "readme 使用说明" \
+            "3" "disable 禁用${BLK_DEVICE}" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1) modify_qemu_shared_folder ;;
+    2) readme_of_9p_file_system ;;
+    3) disable_qemu_disk ;;
+    esac
+    press_enter_to_return
+    tmoe_qemu_disk_manager_04
+}
+#######################
+tmoe_qemu_disk_manager_05() {
+    RETURN_TO_WHERE='tmoe_qemu_disk_manager_05'
+    #15 60 6
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "VIRTIO-DRIVER-ISO" --menu "若您的guest为windows,且未安装virtio & qxl驱动,则请挂载virtio驱动盘,并在guest内安装驱动" 0 0 0 \
+            "1" "Download driver下载并启用驱动盘" \
+            "2" "Choose a iso(cd-02) 选择驱动光盘" \
+            "3" "Readme 使用说明" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1) download_virtio_driver ;;
+    2) choose_qemu_qcow2_or_img_file ;;
+    3) printf '%s\n' '请先以常规挂载方式(IDE或SATA磁盘)运行虚拟机系统，接着在虚拟机内安装virtio驱动，然后退出虚拟机，最后禁用IDE或SATA磁盘，并选择virtio磁盘。若您使用了iso进行全新安装，则可使用以下方案。VIRTIO_DISK_01为空白qcow2磁盘，CD_ROM_DISK_01为win10光盘镜像，CD_ROM_DISK_02为virtio驱动光盘。启动虚拟机后，在安装前，请选择virtio驱动盘内amd64/i386下的w10目录，最后选择win10的virtio磁盘驱动。您亦可修改BOOTINDEX开机引导顺序,将Virtio磁盘-01的引导顺序改为1，将其他磁盘修改为2或3或4。' ;;
+    esac
+    press_enter_to_return
+    ${RETURN_TO_WHERE}
+}
+##########
+delete_current_qemu_vm_disk_file() {
+    CURRENT_VALUE=$(grep "^${BLK_DEVICE}=" ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    stat ${CURRENT_VALUE}
+    qemu-img info ${CURRENT_VALUE}
+    printf "%s\n" "${RED}rm -fv ${BLUE}${CURRENT_VALUE}${RESET}"
+    printf "%s\n" "Do you want to delete it?"
+    printf "%s\n" "删除后将无法撤销，请谨慎操作"
+    do_you_want_to_continue
+    rm -fv ${CURRENT_VALUE}
+}
+################
+set_it_as_the_default_qemu_iso() {
+    ls -lh ${TMOE_FILE_ABSOLUTE_PATH}
+    sed -E -i "s@^(${BLK_DEVICE}=).*@\1"${TMOE_FILE_ABSOLUTE_PATH}"@g;s@^(${BLK_DEVICE}_ENABLED=).*@\1true@g" ${QEMU_FILE}
+    grep -E --color=auto "^${BLK_DEVICE}_ENABLED=|^${BLK_DEVICE}=" ${QEMU_FILE}
+}
+download_virtio_driver() {
+    DOWNLOAD_PATH="${HOME}/sd/Download/qemu"
+    #15 50 4
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "VIRTIO DRIVER" --menu "${VIRTIO_STATUS}" 0 0 0 \
+            "1" "virtio-win-latest.zst(每月16号更新)" \
+            "2" "virtio-win-latest(fedora官网)" \
+            "3" "readme驱动说明" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") tmoe_qemu_disk_manager_05 ;;
+    1)
+        DOWNLOAD_FILE_NAME='virtio-win-latest.iso'
+        THE_LATEST_ISO_LINK="https://cdn.tmoe.me/virtio"
+        printf "%s\n" "Do you want to download the latest virtio-iso.tar.zst from azure?"
+        do_you_want_to_continue
+        mkdir -pv ${DOWNLOAD_PATH}
+        cd ${DOWNLOAD_PATH}
+        aria2c --console-log-level=error --no-conf --allow-overwrite=true -s 6 -x 6 -k 1M -d "${DOWNLOAD_PATH}" -o "${DOWNLOAD_FILE_NAME}.tar.zst" "${THE_LATEST_ISO_LINK}"
+        printf "%s\n" "Extracting ${DOWNLOAD_FILE_NAME}.tar.zst, please wait."
+        tar -I zstd -xvf ${DOWNLOAD_FILE_NAME}.tar.zst
+        TMOE_FILE_ABSOLUTE_PATH="${DOWNLOAD_PATH}/${DOWNLOAD_FILE_NAME}"
+        #check_virtio_driver_iso
+        set_it_as_the_default_qemu_iso
+        ;;
+    2)
+        THE_LATEST_ISO_LINK='https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-virtio/virtio-win.iso'
+        printf "%s\n" "${YELLOW}${THE_LATEST_ISO_LINK}${RESET}"
+        DOWNLOAD_FILE_NAME='virtio-win-latest.iso'
+        check_virtio_driver_iso
+        set_it_as_the_default_qemu_iso
+        ;;
+    3)
+        FEDORA_VIRTIO_URL='https://docs.fedoraproject.org/en-US/quick-docs/creating-windows-virtual-machines-using-virtio-drivers/index.html'
+        printf "%s\n" "url: ${YELLOW}${FEDORA_VIRTIO_URL}${RESET}"
+        su "${CURRENT_USER_NAME}" -c "xdg-open ${FEDORA_VIRTIO_URL}"
+        printf "%s\n" "请将cd-02光盘设置为${DOWNLOAD_PATH}目录下的virtio-win-latest.iso,进入win虚拟机后，再安装virtio驱动。"
+        #xdg-open 'https://docs.fedoraproject.org/en-US/quick-docs/creating-windows-virtual-machines-using-virtio-drivers/index.html' 2>/dev/null
+        ;;
+    esac
+    press_enter_to_return
+    download_virtio_driver
+}
+check_virtio_driver_iso() {
+    TMOE_FILE_ABSOLUTE_PATH="${DOWNLOAD_PATH}/${DOWNLOAD_FILE_NAME}"
+    if [ -f "${TMOE_FILE_ABSOLUTE_PATH}" ]; then
+        if (whiptail --title "检测到virtio.iso已下载,请选择您需要执行的操作！" --yes-button '设为cd02-iso' --no-button '重下DL again' --yesno "Detected that the file has been downloaded.\nDo you want to set it as the default iso, or download it again?" 0 0); then
+            do_you_want_to_continue
+        else
+            aria2c_download_virtio_iso
+        fi
+    else
+        aria2c_download_virtio_iso
+    fi
+}
+aria2c_download_virtio_iso() {
+    [[ -e ${DOWNLOAD_PATH} ]] || mkdir -pv ${DOWNLOAD_PATH}
+    printf "%s\n" "即将为您下载至${DOWNLOAD_PATH}"
+    aria2c --console-log-level=warn --no-conf --allow-overwrite=true -s 6 -x 6 -k 1M -d "${DOWNLOAD_PATH}" -o "${DOWNLOAD_FILE_NAME}" "${THE_LATEST_ISO_LINK}"
+}
+##############
+readme_of_9p_file_system() {
+    cat <<-'EOF'
+		VIRTIO_9P_PCI_01的参数值为宿主机的目录，默认为${HOME}/sd。若您的qemu-system host(宿主)运行在tmoe-linux安装的proot容器里，则建议修改为"/storage/self/primary" ;若为chroot,则建议修改为"/media/sd" ;若为docker或nspawn容器,则建议修改为"/media/docker"。
+		本功能暂仅适配Linux发行版。
+		您需要在guest中挂载9p file system，才能以此方式共享host的目录。
+		精简命令:
+		mkdir -pv ~/sd
+		mount -t 9p -o trans=virtio shared0 ~/sd -o version=9p2000.L,posixacl,cache=mmap
+		完整命令:
+				MOUNT_FOLDER="${HOME}/sd"
+				MOUNT_NAME="shared0"
+				mount_tmoe_linux_9p() {
+				    [[ -e "${MOUNT_FOLDER}" ]] || mkdir -pv "${MOUNT_FOLDER}"
+		            unset TMOE_MOUNT_PREFIX
+				    [[ $(id -u) = "0" ]] || TMOE_MOUNT_PREFIX='sudo'
+		            ${TMOE_MOUNT_PREFIX} mount -t 9p -o trans=virtio ${MOUNT_NAME} "${MOUNT_FOLDER}" -o version=9p2000.L,posixacl,cache=mmap
+				}
+				df | grep "${MOUNT_FOLDER}" &>/dev/null || mount_tmoe_linux_9p
+		注：您可以将完整命令另存为脚本文件，并赋予执行权限，便于自动挂载。
+	EOF
+}
+#####################
+modify_qemu_shared_folder() {
+    if grep -q "${BLK_DEVICE}_ENABLED=.*true" ${QEMU_FILE}; then
+        CURRENT_9P_DIR=$(grep "^${BLK_DEVICE}=" ${QEMU_FILE} | cut -d '=' -f 2)
+        case ${CURRENT_9P_DIR} in
+        "")
+            for i in ${HOME} ${HOME}/sd /sd /media/docker /media/sd; do
+                [[ ! -e ${i} ]] || CURRENT_9P_DIR=${i}
+            done
+            ;;
+        esac
+        IMPORTANT_TIPS="当前已共享${CURRENT_9P_DIR}"
+    else
+        IMPORTANT_TIPS="当前未启用${BLK_DEVICE}"
+    fi
+    RETURN_TO_WHERE='modify_qemu_shared_folder'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "9P FS SHARED DIR" --menu "请选择9p文件系统路径\n${IMPORTANT_TIPS}" 0 0 0 \
+            "1" "${HOME}/sd" \
+            "2" "/media/sd" \
+            "3" "/media/docker" \
+            "4" "/sd" \
+            "5" "${HOME}" \
+            "6" "customize 自定义" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") tmoe_qemu_disk_manager_04 ;;
+    1) CURRENT_9P_DIR='${HOME}/sd' ;;
+    2) CURRENT_9P_DIR='/media/sd' ;;
+    3) CURRENT_9P_DIR='/media/docker' ;;
+    4) CURRENT_9P_DIR='/sd' ;;
+    5) CURRENT_9P_DIR='${HOME}' ;;
+    6) modify_qemu_9p_dir_01 ;;
+    esac
+    sed -E -i "s@^(${BLK_DEVICE}=).*@\1"${CURRENT_9P_DIR}"@g;s@^(${BLK_DEVICE}_ENABLED=).*@\1true@g" ${QEMU_FILE}
+    grep -E --color=auto "^${BLK_DEVICE}_ENABLED=|^${BLK_DEVICE}=" ${QEMU_FILE}
+}
+################
+modify_qemu_9p_dir_01() {
+    TARGET=$(whiptail --inputbox "请输入文件路径,若留空,则使用${HOME}.\nPlease type the path." 10 53 --title "9P PATH" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        ${RETURN_TO_WHERE}
+    elif [ -z "${TARGET}" ]; then
+        CURRENT_9P_DIR='${HOME}'
+    fi
+}
+################
+modify_qemu_disk_format() {
+    CURRENT_DISK_FORMAT=$(grep "^${BLK_DEVICE}_FORMAT=" ${QEMU_FILE} | cut -d '=' -f 2)
+    TMOE_FILE_ABSOLUTE_PATH=$(grep "^${BLK_DEVICE}=" ${QEMU_FILE} | cut -d '=' -f 2)
+    QEMU_IMG_FOEMAT=$(qemu-img info "${TMOE_FILE_ABSOLUTE_PATH}" 2>&1 | grep format | head -n 1 | awk '{print $NF}')
+    if [[ -z ${QEMU_IMG_FOEMAT} || ${QEMU_IMG_FOEMAT} = qcow2 ]]; then
+        QEMU_IMG_FORMAT='raw'
+    fi
+    if (whiptail --title "${BLK_DEVICE} FORMAT" --yes-button "qcow2" --no-button "${QEMU_IMG_FORMAT}" --yesno "Current format is ${CURRENT_DISK_FORMAT}\n如需指定其他格式,请手动修改配置脚本" 0 0); then
+        QEMU_IMG_FORMAT='qcow2'
+    fi
+    sed -E -i "s@^(${BLK_DEVICE}_FORMAT=).*@\1${QEMU_IMG_FORMAT}@g" ${QEMU_FILE}
+    grep --color=auto "^${BLK_DEVICE}_FORMAT=" ${QEMU_FILE}
+}
+modify_qemu_disk_bootindex() {
+    CURRENT_BOOTINDEX=$(grep "^${BLK_DEVICE}_BOOTINDEX=" ${QEMU_FILE} | cut -d '=' -f 2)
+    case ${CURRENT_BOOTINDEX} in
+    "") IMPORTANT_TIPS='当前设备未指定引导顺序' ;;
+    *) IMPORTANT_TIPS="当前设备引导序号为${CURRENT_BOOTINDEX}" ;;
+    esac
+    BOOTINDEX=$(
+        whiptail --title "BOOT INDEX" --menu "指定${BLK_DEVICE}引导顺序,\n${IMPORTANT_TIPS},\n建议您直接在配置文件中修改" 0 0 0 \
+            "0" "🌚 Back 返回" \
+            "1" "第一位" \
+            "2" "第二位" \
+            "3" "第三位" \
+            "4" "第四位" \
+            "5" "第五位" \
+            "6" "第六位" \
+            "7" "第七位" \
+            "8" "第八位" \
+            "9" "第九位" \
+            "10" "第十位" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${BOOTINDEX} in
+    0 | "") ${RETURN_TO_WHERE} ;;
+    *)
+        sed -E -i "s@^(${BLK_DEVICE}_BOOTINDEX=).*@\1${BOOTINDEX}@g" ${QEMU_FILE}
+        grep --color=auto "^${BLK_DEVICE}_BOOTINDEX=" ${QEMU_FILE}
+        ;;
+    esac
+    press_enter_to_return
+    tmoe_qemu_disk_manager_02
+}
+disable_qemu_disk() {
+    sed -E -i "s@^(${BLK_DEVICE}_ENABLED=).*@\1false@g" ${QEMU_FILE}
+    grep -E --color=auto "^${BLK_DEVICE}_ENABLED=|^${BLK_DEVICE}=" ${QEMU_FILE}
+    printf "%s\n" "已${PURPLE}禁用${RESET}${BLUE}${BLK_DEVICE}${RESET}"
+}
+#################
+compress_qcow2_img_file() {
+    choose_qemu_qcow2_or_img_file
+    do_you_want_to_continue
+    if (whiptail --title "请选择压缩方式" --yes-button "compress" --no-button "convert" --yesno "前者为常规压缩，后者转换压缩。♪(^∇^*) " 10 50); then
+        printf '%s\n' 'compressing...'
+        printf '%s\n' '正在压缩中...'
+        printf "${GREEN}%s${RESET}\n" "qemu-img convert -c -O qcow2 ${SELECTION} ${SELECTION}_new-temp-file"
+        qemu-img convert -c -O qcow2 ${SELECTION} ${SELECTION}_new-temp-file
+    else
+        printf '%s\n' 'converting...'
+        printf '%s\n' '正在转换中...'
+        printf "${GREEN}%s${RESET}\n" "qemu-img convert -O qcow2 ${SELECTION} ${SELECTION}_new-temp-file"
+        qemu-img convert -O qcow2 ${SELECTION} ${SELECTION}_new-temp-file
+    fi
+    qemu-img info ${SELECTION}_new-temp-file
+    mv -f ${SELECTION} original_${SELECTION}
+    mv -f ${SELECTION}_new-temp-file ${SELECTION}
+    printf '%s\n' '原文件大小'
+    ls -lh original_${SELECTION} | tail -n 1 | awk '{print $5}'
+    printf '%s\n' '压缩后的文件大小'
+    ls -lh ${SELECTION} | tail -n 1 | awk '{print $5}'
+    printf "%s\n" "压缩完成，是否删除原始文件?"
+    qemu-img check ${SELECTION}
+    printf "%s\n" "Do you want to delete the original file？"
+    printf "%s\n" "请谨慎操作，在保证新磁盘数据无错前，不建议您删除原始文件，否则将导致原文件数据丢失"
+    printf "%s\n" "若您取消操作，则请手动输rm ${FILE_PATH}/original_${SELECTION}"
+    do_you_want_to_continue
+    rm -fv original_${SELECTION}
+}
+################
+expand_qemu_qcow2_img_file() {
+    printf '%s\n' '建议您在调整容量前对磁盘文件进行备份。'
+    printf "%s\n" "在扩容完qcow2后，您可以启动linux guest,在虚拟机内部使用${GREEN}cfdisk${RESET}命令来调整分区。"
+    printf '%s\n' "调整完成之后，您可以再使用resize2fs命令对磁盘空间进行重新识别，例如${BLUE}resize2fs /dev/sda1${RESET}"
+    printf "%s\n" "/dev/sda2一般为sata/scsi磁盘设备,您可以使用${GREEN}fdisk -l${RESET}命令获取磁盘设备路径;若为virtio磁盘,则一般为${BLUE}/dev/vda1${RESET}"
+    #printf '%s\n' '在扩容之后，您必须在虚拟机系统内对该镜像进行分区并格式化后才能真正开始使用新空间。'
+    #在收缩磁盘映像前，必须先使用虚拟机内部系统的分区工具减少该分区的大小，然后相应地收缩磁盘映像，否则收缩磁盘映像将导致数据丢失'
+    printf "%s\n" "If you want to check /dev/sda1,you can type: e2fsck -f /dev/sda1;resize2fs -f /dev/sda1;fdisk -l /dev/sda1"
+    printf '%s\n' 'Arch wiki:After enlarging the disk image, you must use file system and partitioning tools inside the virtual machine to actually begin using the new space. When shrinking a disk image, you must first reduce the allocated file systems and partition sizes using the file system and partitioning tools inside the virtual machine and then shrink the disk image accordingly, otherwise shrinking the disk image will result in data loss! For a Windows guest, open the "create and format hard disk partitions" control panel.'
+    do_you_want_to_continue
+    choose_qemu_qcow2_or_img_file
+    CURRENT_VALUE=$(qemu-img info ${SELECTION} | grep 'virtual size' | awk '{print $3.$4}' | awk -F 'iB' '{print $1}')
+    #10 53
+    TARGET=$(whiptail --inputbox "请输入需要增加的空间大小,例如512M或8G(需包含单位),当前空间为${CURRENT_VALUE}\n若留空，则增加2048M.Please type the size" 10 53 --title "virtual size" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        ${RETURN_TO_WHERE}
+    elif [ -z "${TARGET}" ]; then
+        TARGET="2048M"
+    elif [[ ${TARGET} =~ ^[0-9]+$ ]]; then
+        printf "%s\n" "您未输入单位,将自动增加单位M"
+        TARGET="${TARGET}M"
+    elif [[ ! ${TARGET} =~ ^[0-9].*[A-Za-z]+$ ]]; then
+        printf "%s\n" "磁盘空间大小以纯数字开头，以G或M等单位结尾。"
+        TARGET="2048M"
+    else
+        qemu-img resize ${SELECTION} +${TARGET}
+        qemu-img check ${SELECTION}
+        stat ${SELECTION}
+        qemu-img info ${SELECTION}
+        CURRENT_VALUE=$(qemu-img info ${SELECTION} | grep 'virtual size' | awk '{print $3,$4}')
+        printf "%s\n" "您已将virtual size修改为${CURRENT_VALUE}"
+    fi
+}
+##############
+##############
+##############
+tmoe_qemu_display_settings() {
+    RETURN_TO_WHERE='tmoe_qemu_display_settings'
+    RETURN_TO_TMOE_MENU_01='tmoe_qemu_display_settings'
+    #15 50 7
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "DISPLAY" --menu "Which configuration do you want to modify?" 0 0 0 \
+            "1" "Graphics card(显卡)" \
+            "2" "Sound card声卡" \
+            "3" "vnc/x11/spice(远程与本地桌面)" \
+            "4" "pulseaudio音频" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1) modify_qemu_graphics_card ;;
+    2) modify_qemu_sound_card ;;
+    3) choose_qemu_connection_type ;;
+    4) modify_tmoe_qemu_vnc_pulse_audio_address ;;
+    esac
+    press_enter_to_return
+    tmoe_qemu_display_settings
+}
+################
+modify_tmoe_qemu_vnc_pulse_audio_address() {
+    CURRENT_VALUE=$(grep '^AUDIO_ADDR=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    #10 60
+    AUDIO_ADDR=$(whiptail --inputbox "请输入音频服务地址，默认为127.0.0.1:4713,当前为${CURRENT_VALUE}\nPlease type the pulseaudio server addr." 10 50 --title "MODIFY PULSE SERVER ADDRESS" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        ${RETURN_TO_WHERE}
+    elif [ -z "${AUDIO_ADDR}" ]; then
+        printf "%s\n" "请输入有效的数值"
+        printf "%s\n" "Please enter a valid value"
+        #elif [[ ! ${AUDIO_ADDR} =~ ^([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.([0-9]{1,2}|1[0-9][0-9]|2[0-4][0-9]|25[0-5]):[0-9]{1,5}$ ]]; then
+        #	printf "${PURPLE}%s${RESET}\n" "${AUDIO_ADDR}"
+        #		printf "%s\n" "您输入的地址无效,请重新输入"
+        #printf "%s\n" "Please re-enter."
+        #press_enter_to_return
+        #modify_tmoe_qemu_vnc_pulse_audio_address
+    else
+        sed -E -i "s@^(AUDIO_ADDR=).*@\1${AUDIO_ADDR}@g" ${QEMU_FILE}
+        grep -E --color=auto "^AUDIO_ADDR=" ${QEMU_FILE}
+        printf '%s\n' 'Your current PULSEAUDIO SERVER address has been modified.'
+        printf "%s\n" "您当前的音频地址已修改为$(grep '^AUDIO_ADDR=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)"
+    fi
+}
+##################
+modify_qemu_sound_card() {
+    #RETURN_TO_WHERE='modify_qemu_sound_card'
+    CURRENT_VALUE=$(grep '^SOUND_CARD=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    #16 50 7
+    #ich9-intel-hda，intel-hda,AC97和ES1370。
+    SOUND_CARD_ENABLED=true
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "声卡型号" --menu "Current sound-dev is ${CURRENT_VALUE},the default is intel-hda.\n声卡1默认为intel-hda,声卡2默认为ac97,声卡1当前为${CURRENT_VALUE}" 0 0 0 \
+            "1" "ich9-intel-hda" \
+            "2" "ich6(Intel HD Audio)" \
+            "3" "ac97(Intel 82801AA AC97)" \
+            "4" "es1370(ENSONIQ AudioPCI ES1370)" \
+            "5" "disable 01 禁用第一块声卡" \
+            "6" "disable 02 禁用第二块声卡" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") tmoe_qemu_display_settings ;;
+    1) SOUND_CARD='ich9-intel-hda' ;;
+    2) SOUND_CARD='intel-hda' ;;
+    3) SOUND_CARD='AC97' ;;
+    4) SOUND_CARD='ES1370' ;;
+    5)
+        SOUND_CARD='DISABLED'
+        SOUND_CARD_ENABLED=false
+        ;;
+    6)
+        SOUND_CARD_02='DISABLED'
+        SOUND_CARD_02_ENABLED=false
+        ;;
+    esac
+    case ${TMOE_VIRTUALIZATION} in
+    6)
+        sed -E -i "s@^(SOUND_CARD_02=).*@\1${SOUND_CARD_02}@g;s@^(SOUND_CARD_02_ENABLED=).*@\1${SOUND_CARD_02_ENABLED}@g" ${QEMU_FILE}
+        grep -E --color=auto "^SOUND_CARD_02=|^SOUND_CARD_02_ENABLED=" ${QEMU_FILE}
+        printf "%s\n" "您已将sound_card_02修改为${BLUE}${SOUND_CARD_02}${RESET}"
+        ;;
+    *)
+        sed -E -i "s@^(SOUND_CARD=).*@\1${SOUND_CARD}@g;s@^(SOUND_CARD_ENABLED=).*@\1${SOUND_CARD_ENABLED}@g" ${QEMU_FILE}
+        grep -E --color=auto "^SOUND_CARD=|^SOUND_CARD_ENABLED=" ${QEMU_FILE}
+        printf "%s\n" "您已将sound_card修改为${BLUE}${SOUND_CARD}${RESET}"
+        ;;
+    esac
+    press_enter_to_return
+    ${RETURN_TO_WHERE}
+}
+############
+modify_qemu_graphics_card() {
+    CURRENT_VALUE=$(grep '^GPU_MODEL=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    #16 50 7
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "GPU/VGA" --menu "Current display-dev is ${CURRENT_VALUE},the default is qxl-vga.\n默认为qxl-vga,当前为${CURRENT_VALUE}" 0 0 0 \
+            "1" "virtio-vga:bus PCI,半虚拟化" \
+            "2" "qxl-vga:bus PCI,Spice QXL GPU,半虚拟化" \
+            "3" "VGA:bus PCI" \
+            "4" "bochs-display:bus PCI" \
+            "5" "cirrus-vga:bus PCI,desc(Cirrus CLGD 54xx)" \
+            "6" "secondary-vga:bus PCI" \
+            "7" "ati-vga:bus PCI" \
+            "8" "vmware-svga:bus PCI" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") tmoe_qemu_display_settings ;;
+    1) GPU_MODEL='virtio-vga' ;;
+    2)
+        printf "%s\n" "QXL paravirtual graphic card.  It is VGA compatible (including VESA 2.0 VBE support).  Works best with qxl guest drivers installed though.  Recommended choice when using the spice protocol."
+        GPU_MODEL='qxl-vga'
+        ;;
+    3) GPU_MODEL='VGA' ;;
+    4)
+        printf "%s\n" "std Standard VGA card with Bochs VBE extensions.  If your guest OS supports the VESA 2.0 VBE extensions (e.g. Windows XP) and if you want to use high resolution modes (>= 1280x1024x16) then you should use this option. (This card is the default since QEMU 2.2)"
+        GPU_MODEL='bochs-display'
+        ;;
+    5)
+        printf "%s\n" "Cirrus Logic GD5446 Video card. All Windows versions starting from Windows 95 should recognize and use this graphic card. For optimal performances, use 16 bit color depth in the guest and the host OS.  (This card was the default before QEMU 2.2) "
+        GPU_MODEL='cirrus-vga'
+        ;;
+    6) GPU_MODEL='secondary-vga' ;;
+    7) GPU_MODEL='ati-vga' ;;
+    8)
+        printf "%s\n" " VMWare SVGA-II compatible adapter. Use it if you have sufficiently recent XFree86/XOrg server or Windows guest with a driver for this card."
+        GPU_MODEL='vmware-svga'
+        ;;
+    esac
+    ###############
+    sed -E -i "s@^(GPU_MODEL=).*@\1${GPU_MODEL}@g" ${QEMU_FILE}
+    grep --color=auto "^GPU_MODEL=" ${QEMU_FILE}
+    printf "%s\n" "您已将graphics_card修改为${BLUE}${GPU_MODEL}${RESET}"
+    press_enter_to_return
+    ${RETURN_TO_WHERE}
+}
+###############
+###############
+###############
+tmoe_qemu_x64_cpu_manager() {
+    RETURN_TO_WHERE='tmoe_qemu_x64_cpu_manager'
+    #15 50 6
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "CPU & RAM" --menu "Which configuration do you want to modify?" 0 0 0 \
+            "1" "CPU sockets,cores,threads" \
+            "2" "cpu model/type(型号/类型)" \
+            "3" "RAM运行内存" \
+            "4" "kvm/tcg/xen加速类型" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1) modify_number_of_qemu_cpus ;;
+    2) modify_qemu_amd64_tmoe_cpu_type ;;
+    3) choose_memory_allocation_type ;;
+    4) modify_qemu_machine_accel ;;
+    esac
+    ###############
+    #-soundhw cs4231a \
+    press_enter_to_return
+    ${RETURN_TO_WHERE}
+}
+############
+modify_qemu_machine_accel() {
+    if grep -Eq 'vmx|smx' /proc/cpuinfo; then
+        if [ "$(lsmod | grep kvm)" ]; then
+            KVM_STATUS='检测到您的CPU可能支持硬件虚拟化,并且已经启用了KVM内核模块。'
+        else
+            KVM_STATUS='检测到您的CPU可能支持硬件虚拟化，但未检测到KVM内核模块！'
+        fi
+    else
+        KVM_STATUS='检测到您的CPU可能不支持硬件虚拟化！'
+    fi
+    #17 50 5
+    CURRENT_VALUE=$(grep '^MACHINE_ACCEL=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "加速类型" --menu "KVM要求cpu支持硬件虚拟化,进行同架构模拟运行时能得到比tcg更快的速度。\n${KVM_STATUS}\n当前为${CURRENT_VALUE}" 0 50 0 \
+            "1" "kvm:tcg(default)" \
+            "2" "tcg:kvm" \
+            "3" "tcg" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_WHERE} ;;
+    1)
+        MACHINE_ACCEL="kvm:tcg"
+        ENABLE_KVM=true
+        ;;
+    2)
+        MACHINE_ACCEL="tcg:kvm"
+        ENABLE_KVM=false
+        ;;
+    3)
+        MACHINE_ACCEL="tcg"
+        ENABLE_KVM=false
+        ;;
+    esac
+    ###############
+    sed -E -i "s@^(MACHINE_ACCEL=).*@\1${MACHINE_ACCEL}@g;s@^(ENABLE_KVM=).*@\1${ENABLE_KVM}@g" ${QEMU_FILE}
+    grep --color=auto "^MACHINE_ACCEL=" ${QEMU_FILE}
+    printf "%s\n" "您已将MACHINE_ACCEL修改为${BLUE}${MACHINE_ACCEL}${RESET}"
+}
+#############
+choose_memory_allocation_type() {
+    CURRENT_VALUE=$(grep '^MEMORY_REDUCED=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    [[ -n ${CURRENT_VALUE} ]] || CURRENT_VALUE=256
+    if grep -q '^MEMORY_ALLOCATION=.*auto' ${QEMU_FILE}; then
+        IMPORTANT_TIPS='当前已启用auto分配模式。'
+    else
+        IMPORTANT_TIPS='当前为manually分配模式。'
+    fi
+
+    if (whiptail --title "MEMORY ALLOCATION TYPE" --yes-button 'auto' --no-button 'manually' --yesno "If you choose auto, the guest's RAM will be allocated automatically according to the host's available RAM.\n若选择auto,则将自动分配内存,分配规则为当前宿主机可用内存(不含swap)减去${CURRENT_VALUE}M\n若选manually,则将指定虚拟机内存大小。\n${IMPORTANT_TIPS}" 13 50); then
+        sed -E -i "s@^(MEMORY_ALLOCATION=).*@\1auto@g" ${QEMU_FILE}
+        grep --color=auto "^MEMORY_ALLOCATION=" ${QEMU_FILE}
+        TARGET=$(whiptail --inputbox "已启用auto-mode,请输入自动分配时需要减少的内存大小(非实际内存大小),详见配置脚本中MEMORY_ALLOCATION的说明\n默认为256,当前为${CURRENT_VALUE}\nPlease type size to be reduced during auto allocation" 13 50 --title "MEMORY_REDUCED" 3>&1 1>&2 2>&3)
+        if [ "$?" != "0" ]; then
+            #printf "%s\n" "检测到您取消了操作"
+            ${RETURN_TO_WHERE}
+        elif [ -z "${TARGET}" ]; then
+            printf "%s\n" "请输入有效的数值"
+            printf "%s\n" "Please enter a valid value"
+        elif [[ ! ${TARGET} =~ ^[0-9]+$ ]]; then
+            printf "%s\n" "Please type the pure number"
+        else
+            sed -E -i "s@^(MEMORY_REDUCED=).*@\1${TARGET}@g" ${QEMU_FILE}
+            grep --color=auto "^MEMORY_REDUCED=" ${QEMU_FILE}
+            printf "%s\n" "您已将MEMORY_REDUCED的值修改为${BLUE}${TARGET}${RESET}"
+        fi
+    else
+        modify_qemu_ram_size
+    fi
+}
+#################
+modify_qemu_ram_size() {
+    CURRENT_VALUE_02=$(grep '^MEMORY_SIZE=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    CURRENT_VALUE_03=$(free -m | awk '{print $NF}' | sed -n 2p)
+    TARGET=$(whiptail --inputbox "请输入运行内存大小,默认为1024,当前为${CURRENT_VALUE_02}\n欲改为2G,则输2048;欲改为4G,则输4096\n当前宿主机可用内存${CURRENT_VALUE_03}\nPlease type the RAM size, the default is 1024" 11 50 --title "RAM" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        #printf "%s\n" "检测到您取消了操作"
+        ${RETURN_TO_WHERE}
+    elif [ -z "${TARGET}" ]; then
+        printf "%s\n" "请输入有效的数值"
+        printf "%s\n" "Please enter a valid value"
+    elif [[ ! ${TARGET} =~ ^[0-9]+$ ]]; then
+        printf "%s\n" "Please type the pure number"
+    else
+        sed -E -i "s@^(MEMORY_SIZE=).*@\1${TARGET}@g;s@^(MEMORY_ALLOCATION=).*@\1num@g" ${QEMU_FILE}
+        grep --color=auto "^MEMORY_SIZE=|^MEMORY_ALLOCATION=" ${QEMU_FILE}
+        printf "%s\n" "您已将MEMORY_SIZE的值修改为${BLUE}${TARGET}${RESET}"
+    fi
+}
+modify_number_of_qemu_cpus() {
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "CPU CORES NUM" --menu "Please choose the num of cpu cores.\n默认为2个vcpu,2个sockets,1个core,1个thread\n即2个CPU插槽 x 单核 x 单线程" 0 0 0 \
+            "1" "1x1x1" \
+            "2" "2x1x1" \
+            "4" "2x2x1" \
+            "8" "2x2x2" \
+            "16" "2x4x2" \
+            "32" "2x8x2" \
+            "64" "2x16x2" \
+            "128" "2x32x2" \
+            "255" "255x1x1" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_WHERE} ;;
+    1)
+        CPUS_NUM='1'
+        SOCKETS_NUM='1'
+        CORES_NUM='1'
+        THREADS_NUM='1'
+        ;;
+    2)
+        CPUS_NUM='2'
+        SOCKETS_NUM='2'
+        CORES_NUM='1'
+        THREADS_NUM='1'
+        ;;
+    4)
+        CPUS_NUM='4'
+        SOCKETS_NUM='2'
+        CORES_NUM='2'
+        THREADS_NUM='1'
+        ;;
+    8)
+        CPUS_NUM='8'
+        SOCKETS_NUM='2'
+        CORES_NUM='2'
+        THREADS_NUM='2'
+        ;;
+    16)
+        CPUS_NUM='16'
+        SOCKETS_NUM='2'
+        CORES_NUM='4'
+        THREADS_NUM='2'
+        ;;
+    32)
+        CPUS_NUM='32'
+        SOCKETS_NUM='2'
+        CORES_NUM='8'
+        THREADS_NUM='2'
+        ;;
+    64)
+        CPUS_NUM='64'
+        SOCKETS_NUM='2'
+        CORES_NUM='16'
+        THREADS_NUM='2'
+        ;;
+    128)
+        CPUS_NUM='128'
+        SOCKETS_NUM='2'
+        CORES_NUM='32'
+        THREADS_NUM='2'
+        ;;
+    255)
+        CPUS_NUM='255'
+        SOCKETS_NUM='255'
+        CORES_NUM='1'
+        THREADS_NUM='1'
+        ;;
+    esac
+    ###############
+    sed -E -i "s@^(CPUS_NUM=).*@\1${CPUS_NUM}@g;s@^(SOCKETS_NUM=).*@\1${SOCKETS_NUM}@g;s@^(CORES_NUM=).*@\1${CORES_NUM}@g;s@^(THREADS_NUM=).*@\1${THREADS_NUM}@g" ${QEMU_FILE}
+    grep -E --color=auto "^CPUS_NUM=|^SOCKETS_NUM=|^CORES_NUM=|^THREADS_NUM=" ${QEMU_FILE}
+}
+###############
+###############
+###############
+modify_tmoe_qemu_network_settings() {
+    RETURN_TO_WHERE='modify_tmoe_qemu_network_settings'
+    NET_DEVICE='NET_CARD_01'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "network devices" --menu "Which configuration do you want to modify？" 0 0 0 \
+            "1" "network card 01(第一块网卡)" \
+            "2" "net-01 port forward端口转发01" \
+            "3" "network card 02(第二块网卡)" \
+            "4" "net-02 port forward端口转发02" \
+            "5" "network card 03(第三块网卡)" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1)
+        NET_DEVICE='NET_CARD_01'
+        DEFAULT_VALUE='virtio-net-pci'
+        IMPORTANT_TIPS="网卡01默认为${DEFAULT_VALUE},"
+        modify_qemu_tmoe_network_card
+        ;;
+    2)
+        NET_DEVICE='NET_CARD_01'
+        modify_qemu_exposed_ports
+        ;;
+    3)
+        NET_DEVICE='NET_CARD_02'
+        DEFAULT_VALUE="e1000"
+        IMPORTANT_TIPS="网卡02默认为${DEFAULT_VALUE},"
+        modify_qemu_tmoe_network_card
+        ;;
+    4)
+        NET_DEVICE='NET_CARD_02'
+        modify_qemu_exposed_ports
+        ;;
+    5)
+        NET_DEVICE='NET_CARD_03'
+        DEFAULT_VALUE="rtl8139"
+        IMPORTANT_TIPS="网卡03默认为${DEFAULT_VALUE},"
+        modify_qemu_tmoe_network_card
+        ;;
+    esac
+    ###############
+    press_enter_to_return
+    modify_tmoe_qemu_network_settings
+}
+#############
+modify_qemu_tmoe_network_card() {
+    RETURN_TO_WHERE='modify_qemu_tmoe_network_card'
+    #16 50 7
+    CURRENT_VALUE=$(grep "^${NET_DEVICE}=" ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "网卡型号" --menu "Current netdev is ${CURRENT_VALUE},the default is ${DEFAULT_VALUE}.\n${IMPORTANT_TIPS}当前为${CURRENT_VALUE}" 0 0 0 \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            "1" "disable 禁用" \
+            "2" "virtio-net-pci" \
+            "3" "e1000:alias e1000-82540em" \
+            "4" "e1000-82544gc:Intel Gigabit Ethernet" \
+            "5" "e1000-82545em" \
+            "6" "e1000e:Intel 82574L GbE Controller" \
+            "7" "Realtek rtl8139" \
+            "8" "vmxnet3:VMWare Paravirtualized Eth v3" \
+            "9" "i82550:Intel i82550 Ethernet" \
+            "10" "i82551" \
+            "11" "i82557a" \
+            "12" "i82557b" \
+            "13" "i82557c" \
+            "14" "i82558a" \
+            "15" "i82558b" \
+            "16" "i82559a" \
+            "17" "i82559b" \
+            "18" "i82559er" \
+            "19" "i82562" \
+            "20" "i82801" \
+            "21" "ne2k_pci" \
+            "22" "pcnet" \
+            "23" "pcnet" \
+            "24" "pvrdma" \
+            "25" "rocker" \
+            "26" "tulip" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") modify_tmoe_qemu_network_settings ;;
+    2) TMOE_QEMU_NETWORK_CARD="virtio-net-pci" ;;
+    3) TMOE_QEMU_NETWORK_CARD="e1000" ;;
+    4) TMOE_QEMU_NETWORK_CARD="e1000-82544gc" ;;
+    5) TMOE_QEMU_NETWORK_CARD="e1000-82545em" ;;
+    6) TMOE_QEMU_NETWORK_CARD="e1000e" ;;
+    7) TMOE_QEMU_NETWORK_CARD="rtl8139" ;;
+    8) TMOE_QEMU_NETWORK_CARD="vmxnet3" ;;
+    9) TMOE_QEMU_NETWORK_CARD="i82550" ;;
+    10) TMOE_QEMU_NETWORK_CARD="i82551" ;;
+    11) TMOE_QEMU_NETWORK_CARD="i82557a" ;;
+    12) TMOE_QEMU_NETWORK_CARD="i82557b" ;;
+    13) TMOE_QEMU_NETWORK_CARD="i82557c" ;;
+    14) TMOE_QEMU_NETWORK_CARD="i82558a" ;;
+    15) TMOE_QEMU_NETWORK_CARD="i82558b" ;;
+    16) TMOE_QEMU_NETWORK_CARD="i82559a" ;;
+    17) TMOE_QEMU_NETWORK_CARD="i82559b" ;;
+    18) TMOE_QEMU_NETWORK_CARD="i82559er" ;;
+    19) TMOE_QEMU_NETWORK_CARD="i82562" ;;
+    20) TMOE_QEMU_NETWORK_CARD="i82801" ;;
+    21) TMOE_QEMU_NETWORK_CARD="ne2k_pci" ;;
+    22) TMOE_QEMU_NETWORK_CARD="pcnet" ;;
+    23) TMOE_QEMU_NETWORK_CARD="pcnet" ;;
+    24) TMOE_QEMU_NETWORK_CARD="pvrdma" ;;
+    25) TMOE_QEMU_NETWORK_CARD="rocker" ;;
+    26) TMOE_QEMU_NETWORK_CARD="tulip" ;;
+    esac
+    case ${TMOE_VIRTUALIZATION} in
+    1)
+        sed -E -i "s@^(${NET_DEVICE}_ENABLED=).*@\1false@g" ${QEMU_FILE}
+        sed -E -i "s@^(${NET_DEVICE}=).*@\1DISABLED@g" ${QEMU_FILE}
+        printf "%s\n" "您已禁用${NET_DEVICE}"
+        ;;
+    *)
+        sed -E -i "s@^(${NET_DEVICE}=).*@\1"${TMOE_QEMU_NETWORK_CARD}"@g;s@^(${NET_DEVICE}_ENABLED=).*@\1true@g" ${QEMU_FILE}
+        printf "%s\n" "您已将network card修改为${TMOE_QEMU_NETWORK_CARD}"
+        ;;
+    esac
+    grep -E --color=auto "^${NET_DEVICE}_ENABLED=|^${NET_DEVICE}=" ${QEMU_FILE}
+}
+###########
+modify_qemu_exposed_ports() {
+    case ${NET_DEVICE} in
+    NET_CARD_02) PORT_FWD_VAR='TCP_PORT_HOST_FWD_02' ;;
+    NET_CARD_01) PORT_FWD_VAR='TCP_PORT_HOST_FWD_01' ;;
+    esac
+    CURRENT_VALUE=$(grep "^${PORT_FWD_VAR}_ENABLED=" ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    #IMPORTANT_TIPS
+    if (whiptail --title "TCP PORT FWD" --yes-button 'modify rules' --no-button 'disable' --yesno "您是想要修改tcp端口转发规则，还是禁用此功能呢？\n如需修改udp端口转发规则，则请手动编辑配置脚本\n检测到${PORT_FWD_VAR}的状态为${CURRENT_VALUE}\nDo you want to modify the tcp port fwd rules,or disable it." 13 50); then
+        modify_qemu_host_and_guest_port
+    else
+        disable_qemu_tcp_port_fwd
+    fi
+}
+#################
+disable_qemu_tcp_port_fwd() {
+    sed -E -i "s@^(${PORT_FWD_VAR}_ENABLED=).*@\1false@g" ${QEMU_FILE}
+    grep -E --color=auto "^${PORT_FWD_VAR}_ENABLED=" ${QEMU_FILE}
+    printf "%s\n" "您${PURPLE}已禁用${BLUE}${PORT_FWD_VAR}${RESET}"
+}
+#################
+modify_qemu_host_and_guest_port() {
+    CURRENT_VALUE=$(grep "^${PORT_FWD_VAR}=" ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    TCP_PORT_FWD_RULES=$(whiptail --inputbox "请输入端口转发规则,例如2888:22,39081:39080\n22为guest的ssh端口,2888为host的端口,用逗号分隔不同的规则\nThe current port fwd rules are ${CURRENT_VALUE}" 13 50 --title "TCP PORT FWD RULES" 3>&1 1>&2 2>&3)
+    if [ "$?" != "0" ]; then
+        ${RETURN_TO_WHERE}
+    elif [ -z "${TCP_PORT_FWD_RULES}" ]; then
+        printf "%s\n" "请输入有效的数值"
+        printf "%s\n" "Please enter a valid value"
+    else
+        sed -E -i "s@^(${PORT_FWD_VAR}=).*@\1"${TCP_PORT_FWD_RULES}"@g;s@^(${PORT_FWD_VAR}_ENABLED=).*@\1true@g" ${QEMU_FILE}
+        grep -E --color=auto "^${PORT_FWD_VAR}_ENABLED=|^${PORT_FWD_VAR}=" ${QEMU_FILE}
+        printf "%s\n" "您已将${PORT_FWD_VAR}转发规则修改为${TCP_PORT_FWD_RULES}"
+    fi
+}
+########
+########
+########
+modify_tmoe_qemu_extra_options() {
+    RETURN_TO_WHERE='modify_tmoe_qemu_extra_options'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "EXTRA OPTIONS" --menu "Which configuration do you want to modify？" 0 0 0 \
+            "1" "legacy bios or uefi" \
+            "2" "uefi file" \
+            "3" "修改qemu bin路径" \
+            "4" "🍤 FAQ常见问题" \
+            "5" "architecture架构(x86/x64)" \
+            "6" "machine 机器类型(1996/2009)" \
+            "7" "RTC(localtime/UTC)" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1) choose_uefi_or_bios ;;
+    2) choose_qemu_bios_or_uefi_file ;;
+    3) modify_qemu_bin_path ;;
+    4) tmoe_qemu_faq ;;
+    5) choose_your_qemu_arch ;;
+    6) choose_qemu_machine_type ;;
+    7) choose_qemu_rtc_base ;;
+    esac
+    ###############
+    press_enter_to_return
+    modify_tmoe_qemu_extra_options
+}
+#################
+choose_qemu_rtc_base() {
+    CURRENT_VALUE=$(grep '^RTC_BASE=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    if (whiptail --title "RTC BASE" --yes-button 'utc' --no-button 'localtime' --yesno "Current rtc-base is ${CURRENT_VALUE}.\n若guest为linux,则选择utc,若为win,则选localtime" 10 50); then
+        RTC_BASE='utc'
+    else
+        RTC_BASE='localtime'
+    fi
+    sed -E -i "s@^(RTC_BASE=).*@\1${RTC_BASE}@g" ${QEMU_FILE}
+    grep --color=auto "^RTC_BASE=" ${QEMU_FILE}
+}
+delete_current_qemu_vm_conf() {
+    UEFI_VARS_PFLASH="${HOME}/.config/tmoe-linux/qemu/${QEMU_VM_NAME}-NVRAM.fd"
+    printf "%s\n" "${RED}rm -fv ${BLUE}${QEMU_FILE} ${HOME}/${QEMU_VM_NAME} ${UEFI_VARS_PFLASH}${RESET}"
+    do_you_want_to_continue
+    rm -fv ${QEMU_FILE} ${HOME}/${QEMU_VM_NAME}
+    [[ ! -e ${UEFI_VARS_PFLASH} ]] || rm -fv ${UEFI_VARS_PFLASH}
+    press_enter_to_return
+    tmoe_qemu_main_menu
+    #此处需返回qemu主菜单
+}
+###############
+modify_qemu_bin_path() {
+    CURRENT_VALUE=$(grep "^QEMU_BIN_PATH=" ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    if (whiptail --title "QEMU BIN PATH" --yes-button '/usr/bin' --no-button '/usr/local/bin' --yesno "Please choose the qemu bin file path\n请选择qemu二进制文件所在路径\n当前为${CURRENT_VALUE}" 10 50); then
+        QEMU_BIN_PATH="/usr/bin"
+    else
+        QEMU_BIN_PATH="/usr/local/bin"
+    fi
+    if [ ! -x "${QEMU_BIN_PATH}/qemu-system-x86_64" ]; then
+        chmod a+rx -v "${QEMU_BIN_PATH}/qemu-system-x86_64"
+        printf "${RED}%s${RESET}%s\n" "ERROR！" "目标路径下的qemu-system-x86_64无执行权限。"
+    else
+        sed -E -i "s@^(QEMU_BIN_PATH=).*@\1${QEMU_BIN_PATH}@g" ${QEMU_FILE}
+        grep -E --color=auto "^QEMU_BIN_PATH=" ${QEMU_FILE}
+        printf "%s\n" "您已将QEMU_BIN_PATH修改为${QEMU_BIN_PATH}"
+    fi
+}
+choose_qemu_bios_or_uefi_file() {
+    # if [ ! -e "/usr/share/qemu-efi-aarch64/QEMU_EFI.fd" ]; then
+    # 	DEPENDENCY_01=''
+    # 	DEPENDENCY_02='qemu-efi-aarch64'
+    # 	#beta_features_quick_install
+    # fi
+    if [ ! -e "/usr/share/ovmf/OVMF.fd" ]; then
+        DEPENDENCY_01=''
+        DEPENDENCY_02='ovmf'
+        beta_features_quick_install
+    fi
+    RETURN_TO_WHERE='choose_qemu_bios_or_uefi_file'
+
+    if grep -q 'UEFI_ENABLED=.*true' ${QEMU_FILE}; then
+        CURRENT_VALUE=$(grep '^UEFI_CODE_PFLASH=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    else
+        CURRENT_VALUE='legacy bios'
+    fi
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "uefi" --menu "Please choose a uefi file.\n当前为${CURRENT_VALUE}" 0 0 0 \
+            "1" "ovmf:TianoCore firmware for x64" \
+            "2" "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd" \
+            "3" "/usr/share/OVMF/OVMF_CODE_4M.fd" \
+            "4" "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd" \
+            "5" "/usr/share/OVMF/OVMF_CODE.fd" \
+            "6" "choose a file自选文件" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #ovmf:TianoCore firmware for x64
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") modify_tmoe_qemu_extra_options ;;
+    1) TMOE_QEMU_BIOS_FILE_PATH='/usr/share/ovmf/OVMF_CODE.fd' ;;
+    2) TMOE_QEMU_BIOS_FILE_PATH='/usr/share/edk2-ovmf/x64/OVMF_CODE.fd' ;;
+    3) TMOE_QEMU_BIOS_FILE_PATH='/usr/share/OVMF/OVMF_CODE_4M.fd' ;;
+    4) TMOE_QEMU_BIOS_FILE_PATH='/usr/share/OVMF/OVMF_CODE_4M.secboot.fd' ;;
+    5) TMOE_QEMU_BIOS_FILE_PATH='/usr/share/OVMF/OVMF_CODE.fd' ;;
+    6) tmoe_choose_a_qemu_bios_file ;;
+    esac
+    ###############
+    sed -E -i "s@^(UEFI_CODE_PFLASH=).*@\1"${TMOE_QEMU_BIOS_FILE_PATH}"@g;s@^(UEFI_ENABLED=).*@\1true@g" ${QEMU_FILE}
+    grep -E --color=auto "^UEFI_CODE_PFLASH=|^UEFI_ENABLED=" ${QEMU_FILE}
+    printf "%s\n" "您已将UEFI文件修改为${TMOE_QEMU_BIOS_FILE_PATH}"
+}
+##########
+tmoe_choose_a_qemu_bios_file() {
+    FILE_EXT_01='fd'
+    FILE_EXT_02='bin'
+    IMPORTANT_TIPS="您当前已加载的bios为${CURRENT_VALUE}"
+    CURRENT_QEMU_ISO="${CURRENT_VALUE}"
+    where_is_tmoe_file_dir
+    if [ -z ${SELECTION} ]; then
+        printf "%s\n" "没有指定${YELLOW}有效${RESET}的${BLUE}文件${GREEN}，请${GREEN}重新${RESET}选择"
+        press_enter_to_return
+        ${RETURN_TO_WHERE}
+    else
+        printf "%s\n" "您选择的文件为${TMOE_FILE_ABSOLUTE_PATH}"
+        ls -lah ${TMOE_FILE_ABSOLUTE_PATH}
+        cd ${FILE_PATH}
+        file ${SELECTION}
+    fi
+    TMOE_QEMU_BIOS_FILE_PATH="${TMOE_FILE_ABSOLUTE_PATH}"
+    do_you_want_to_continue
+}
+########
+########
+how_to_create_a_new_tmoe_qemu_vm() {
+    cat <<-'EOF'
+		   1.下载iso镜像文件 Download a iso file.
+		   若虚拟磁盘内已经安装了系统，则可跳过此步。
+		   If the qcow2 disk has a built-in system,then you can skip this step.
+		        
+			2.新建一个虚拟磁盘
+			create a new vitual disk (qcow2 format).
+
+			3.选择启动光盘iso
+			Choose a iso file(CD-ROM)
+
+			4.选择启动磁盘
+			Choose a qcow2 disk
+
+			5.修改相关参数
+			Modify the parameters of qemu.
+
+			6.输startqemu
+			Type startqemu and press enter
+			-------------------
+			注：若您使用的是x86虚拟机镜像，则需要在额外选项中，将架构切换为i386。
+			If you are using x86 image, please switch to i386 architecture in the extra options.
+	EOF
+}
+tmoe_qemu_faq() {
+    RETURN_TO_WHERE='tmoe_qemu_faq'
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "FAQ(よくある質問)" --menu "您有哪些疑问？\nWhat questions do you have?" 13 55 3 \
+            "1" "process进程管理说明" \
+            "2" "create a new vm如何新建虚拟机" \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_MENU} ;;
+    1) qemu_process_management_instructions ;;
+    2) how_to_create_a_new_tmoe_qemu_vm ;;
+    esac
+    ###############
+    press_enter_to_return
+    tmoe_qemu_faq
+}
+################
+qemu_process_management_instructions() {
+    CURRENT_VNC_PORT=$(grep "^VNC_PORT=" ${QEMU_FILE} | cut -d '=' -f 2)
+    printf "%s\n" "输startqemu启动qemu"
+    printf "%s\n" "${BLUE}连接方式01${RESET}"
+    printf "%s\n" "打开vnc客户端，输入访问地址localhost:${CURRENT_VNC_PORT}"
+    printf "%s\n" "${BLUE}关机方式01${RESET}"
+    printf "%s\n" "在qemu monitor界面下输system_powerdown关闭虚拟机电源，输stop停止"
+    printf "%s\n" "按Ctrl+C退出qemu monitor"
+    printf "%s\n" "Press Ctrl+C to exit qemu monitor."
+    printf "%s\n" "${BLUE}连接方式02${RESET}"
+    printf "%s\n" "若您需要使用ssh连接，则请新建一个termux会话窗口，并输入${GREEN}ssh -p 2888 root@localhost${RESET}"
+    printf "%s\n" "本工具默认将虚拟机的22端口映射为宿主机的2888端口，若无法连接，则请在虚拟机下新建一个普通用户，再将上述命令中的root修改为普通用户名称"
+    printf "%s\n" "若连接提示${YELLOW}REMOTE HOST IDENTIFICATION HAS CHANGED${RESET}，则请手动输${GREEN}ssh-keygen -f '/root/.ssh/known_hosts' -R '[localhost]:2888'${RESET}"
+    printf "%s\n" "${BLUE}关机方式02${RESET}"
+    printf "%s\n" "在linux虚拟机内输poweroff"
+    printf "%s\n" "在windows虚拟机内输shutdown /s /t 0"
+    printf "%s\n" "${BLUE}重启方式01${RESET}"
+    printf "%s\n" "在linux虚拟机内输reboot"
+    printf "%s\n" "在windows虚拟机内输shutdown /r /t 0"
+}
+#################
+check_qemu_installation() {
+    DEPENDENCY_01='qemu'
+    DEPENDENCY_02=''
+    if [ ! $(command -v qemu-system-x86_64) ]; then
+        case "${LINUX_DISTRO}" in
+        "debian")
+            if grep -q 'VERSION_CODENAME=buster' /etc/os-release; then
+                DEPENDENCY_01='-t buster-backports qemu qemu-system-x86'
+            else
+                DEPENDENCY_01='qemu qemu-system-x86'
+            fi
+            DEPENDENCY_02='qemu-system-gui'
+            ;;
+        "alpine")
+            DEPENDENCY_01='qemu qemu-system-x86_64 qemu-system-i386'
+            DEPENDENCY_02='qemu-system-aarch64'
+            ;;
+        "arch")
+            DEPENDENCY_02='edk2-ovmf'
+            ;;
+        esac
+        beta_features_quick_install
+    fi
+}
+#############
+#sed '$!N;$!P;$!D;s/\(\n\)/\n    -test \\ \n/' startqemu
+#sed "s@$(cat startqemu | tail -n 1)@& \\\@" startqemu
+modify_qemu_amd64_tmoe_cpu_type() {
+    CURRENT_VALUE=$(grep '^CPU_MODEL=' ${QEMU_FILE} | head -n 1 | cut -d '=' -f 2)
+    TMOE_VIRTUALIZATION=$(
+        whiptail --title "CPU" --menu "默认为max,当前为${CURRENT_VALUE}" 0 0 0 \
+            "0" "🌚 Return to previous menu 返回上级菜单" \
+            "000" "default(默认,启用加速器支持的所有可用功能)" \
+            "001" "486:(alias configured by machine type)" \
+            "002" "486-v1" \
+            "003" "Broadwell:(alias configured by machine type)" \
+            "004" "Broadwell-IBRS:(alias of Broadwell-v3)" \
+            "005" "Broadwell-noTSX:(alias of Broadwell-v2)" \
+            "006" "Broadwell-noTSX-IBRS:(alias of Broadwell-v4)" \
+            "007" "Broadwell-v1:Intel Core Processor (Broadwell)" \
+            "008" "Broadwell-v2:Intel Core Processor (Broadwell, no TSX)" \
+            "009" "Broadwell-v3:Intel Core Processor (Broadwell, IBRS)" \
+            "010" "Broadwell-v4:Intel Core Processor (Broadwell, no TSX, IBRS)" \
+            "011" "Cascadelake-Server:(alias configured by machine type)" \
+            "012" "Cascadelake-Server-noTSX:(alias of Cascadelake-Server-v3)" \
+            "013" "Cascadelake-Server-v1:Intel Xeon Processor (Cascadelake)" \
+            "014" "Cascadelake-Server-v2:Intel Xeon Processor (Cascadelake)" \
+            "015" "Cascadelake-Server-v3:Intel Xeon Processor (Cascadelake)" \
+            "016" "Conroe:(alias configured by machine type)" \
+            "017" "Conroe-v1:Intel Celeron_4x0 (Conroe/Merom Class Core 2)" \
+            "018" "Cooperlake:(alias configured by machine type)" \
+            "019" "Cooperlake-v1:Intel Xeon Processor (Cooperlake)" \
+            "020" "Denverton:(alias configured by machine type)" \
+            "021" "Denverton-v1:Intel Atom Processor (Denverton)" \
+            "022" "Denverton-v2:Intel Atom Processor (Denverton)" \
+            "023" "Dhyana:(alias configured by machine type)" \
+            "024" "Dhyana-v1:Hygon Dhyana Processor" \
+            "025" "EPYC:(alias configured by machine type)" \
+            "026" "EPYC-IBPB:(alias of EPYC-v2)" \
+            "027" "EPYC-Rome:(alias configured by machine type)" \
+            "028" "EPYC-Rome-v1:AMD EPYC-Rome Processor" \
+            "029" "EPYC-v1:AMD EPYC Processor" \
+            "030" "EPYC-v2:AMD EPYC Processor (with IBPB)" \
+            "031" "EPYC-v3:AMD EPYC Processor" \
+            "032" "Haswell:(alias configured by machine type)" \
+            "033" "Haswell-IBRS:(alias of Haswell-v3)" \
+            "034" "Haswell-noTSX:(alias of Haswell-v2)" \
+            "035" "Haswell-noTSX-IBRS:(alias of Haswell-v4)" \
+            "036" "Haswell-v1:Intel Core Processor (Haswell)" \
+            "037" "Haswell-v2:Intel Core Processor (Haswell, no TSX)" \
+            "038" "Haswell-v3:Intel Core Processor (Haswell, IBRS)" \
+            "039" "Haswell-v4:Intel Core Processor (Haswell, no TSX, IBRS)" \
+            "040" "Icelake-Client:(alias configured by machine type)" \
+            "041" "Icelake-Client-noTSX:(alias of Icelake-Client-v2)" \
+            "042" "Icelake-Client-v1:Intel Core Processor (Icelake)" \
+            "043" "Icelake-Client-v2:Intel Core Processor (Icelake)" \
+            "044" "Icelake-Server:(alias configured by machine type)" \
+            "045" "Icelake-Server-noTSX:(alias of Icelake-Server-v2)" \
+            "046" "Icelake-Server-v1:Intel Xeon Processor (Icelake)" \
+            "047" "Icelake-Server-v2:Intel Xeon Processor (Icelake)" \
+            "048" "Icelake-Server-v3:Intel Xeon Processor (Icelake)" \
+            "049" "IvyBridge:(alias configured by machine type)" \
+            "050" "IvyBridge-IBRS:(alias of IvyBridge-v2)" \
+            "051" "IvyBridge-v1:Intel Xeon E3-12xx v2 (Ivy Bridge)" \
+            "052" "IvyBridge-v2:Intel Xeon E3-12xx v2 (Ivy Bridge, IBRS)" \
+            "053" "KnightsMill:(alias configured by machine type)" \
+            "054" "KnightsMill-v1:Intel Xeon Phi Processor (Knights Mill)" \
+            "055" "Nehalem:(alias configured by machine type)" \
+            "056" "Nehalem-IBRS:(alias of Nehalem-v2)" \
+            "057" "Nehalem-v1:Intel Core i7 9xx (Nehalem Class Core i7)" \
+            "058" "Nehalem-v2:Intel Core i7 9xx (Nehalem Core i7, IBRS update)" \
+            "059" "Opteron_G1:(alias configured by machine type)" \
+            "060" "Opteron_G1-v1:AMD Opteron 240 (Gen 1 Class Opteron)" \
+            "061" "Opteron_G2:(alias configured by machine type)" \
+            "062" "Opteron_G2-v1:AMD Opteron 22xx (Gen 2 Class Opteron)" \
+            "063" "Opteron_G3:(alias configured by machine type)" \
+            "064" "Opteron_G3-v1:AMD Opteron 23xx (Gen 3 Class Opteron)" \
+            "065" "Opteron_G4:(alias configured by machine type)" \
+            "066" "Opteron_G4-v1:AMD Opteron 62xx class CPU" \
+            "067" "Opteron_G5:(alias configured by machine type)" \
+            "068" "Opteron_G5-v1:AMD Opteron 63xx class CPU" \
+            "069" "Penryn:(alias configured by machine type)" \
+            "070" "Penryn-v1:Intel Core 2 Duo P9xxx (Penryn Class Core 2)" \
+            "071" "SandyBridge:(alias configured by machine type)" \
+            "072" "SandyBridge-IBRS:(alias of SandyBridge-v2)" \
+            "073" "SandyBridge-v1:Intel Xeon E312xx (Sandy Bridge)" \
+            "074" "SandyBridge-v2:Intel Xeon E312xx (Sandy Bridge, IBRS update)" \
+            "075" "Skylake-Client:(alias configured by machine type)" \
+            "076" "Skylake-Client-IBRS:(alias of Skylake-Client-v2)" \
+            "077" "Skylake-Client-noTSX-IBRS:BRS  (alias of Skylake-Client-v3)" \
+            "078" "Skylake-Client-v1:Intel Core Processor (Skylake)" \
+            "079" "Skylake-Client-v2:Intel Core Processor (Skylake, IBRS)" \
+            "080" "Skylake-Client-v3:Intel Core Processor (Skylake, IBRS, no TSX)" \
+            "081" "Skylake-Server:(alias configured by machine type)" \
+            "082" "Skylake-Server-IBRS:(alias of Skylake-Server-v2)" \
+            "083" "Skylake-Server-noTSX-IBRS:BRS  (alias of Skylake-Server-v3)" \
+            "084" "Skylake-Server-v1:Intel Xeon Processor (Skylake)" \
+            "085" "Skylake-Server-v2:Intel Xeon Processor (Skylake, IBRS)" \
+            "086" "Skylake-Server-v3:Intel Xeon Processor (Skylake, IBRS, no TSX)" \
+            "087" "Snowridge:(alias configured by machine type)" \
+            "088" "Snowridge-v1:Intel Atom Processor (SnowRidge)" \
+            "089" "Snowridge-v2:Intel Atom Processor (Snowridge, no MPX)" \
+            "090" "Westmere:(alias configured by machine type)" \
+            "091" "Westmere-IBRS:(alias of Westmere-v2)" \
+            "092" "Westmere-v1:Westmere E56xx/L56xx/X56xx (Nehalem-C)" \
+            "093" "Westmere-v2:Westmere E56xx/L56xx/X56xx (IBRS update)" \
+            "094" "athlon:(alias configured by machine type)" \
+            "095" "athlon-v1:QEMU Virtual CPU version 2.5+" \
+            "096" "core2duo:(alias configured by machine type)" \
+            "097" "core2duo-v1:Intel(R) Core(TM)2 Duo CPU     T7700  @ 2.40GHz" \
+            "098" "coreduo:(alias configured by machine type)" \
+            "099" "coreduo-v1:Genuine Intel(R) CPU           T2600  @ 2.16GHz" \
+            "100" "kvm32:(alias configured by machine type)" \
+            "101" "kvm32-v1:Common 32-bit KVM processor" \
+            "102" "kvm64:(alias configured by machine type)" \
+            "103" "kvm64-v1:Common KVM processor" \
+            "104" "n270:(alias configured by machine type)" \
+            "105" "n270-v1:Intel(R) Atom(TM) CPU N270   @ 1.60GHz" \
+            "106" "pentium:(alias configured by machine type)" \
+            "107" "pentium-v1" \
+            "108" "pentium2:(alias configured by machine type)" \
+            "109" "pentium2-v1" \
+            "110" "pentium3:(alias configured by machine type)" \
+            "111" "pentium3-v1" \
+            "112" "phenom:(alias configured by machine type)" \
+            "113" "phenom-v1:AMD Phenom(tm) 9550 Quad-Core Processor" \
+            "114" "qemu32:(alias configured by machine type)" \
+            "115" "qemu32-v1:QEMU Virtual CPU version 2.5+" \
+            "116" "qemu64:(alias configured by machine type)" \
+            "117" "qemu64-v1:QEMU Virtual CPU version 2.5+" \
+            "118" "base:base CPU model type with no features enabled" \
+            "119" "host:KVM processor with all supported host features" \
+            "120" "max:Enables all features supported by the accelerator in the current host" \
+            3>&1 1>&2 2>&3
+    )
+    #############
+    case ${TMOE_VIRTUALIZATION} in
+    0 | "") ${RETURN_TO_WHERE} ;;
+    000) TMOE_AMD64_QEMU_CPU_TYPE="max" ;;
+    001) TMOE_AMD64_QEMU_CPU_TYPE="486" ;;
+    002) TMOE_AMD64_QEMU_CPU_TYPE="486-v1" ;;
+    003) TMOE_AMD64_QEMU_CPU_TYPE="Broadwell" ;;
+    004) TMOE_AMD64_QEMU_CPU_TYPE="Broadwell-IBRS" ;;
+    005) TMOE_AMD64_QEMU_CPU_TYPE="Broadwell-noTSX" ;;
+    006) TMOE_AMD64_QEMU_CPU_TYPE="Broadwell-noTSX-IBRS" ;;
+    007) TMOE_AMD64_QEMU_CPU_TYPE="Broadwell-v1" ;;
+    008) TMOE_AMD64_QEMU_CPU_TYPE="Broadwell-v2" ;;
+    009) TMOE_AMD64_QEMU_CPU_TYPE="Broadwell-v3" ;;
+    010) TMOE_AMD64_QEMU_CPU_TYPE="Broadwell-v4" ;;
+    011) TMOE_AMD64_QEMU_CPU_TYPE="Cascadelake-Server" ;;
+    012) TMOE_AMD64_QEMU_CPU_TYPE="Cascadelake-Server-noTSX" ;;
+    013) TMOE_AMD64_QEMU_CPU_TYPE="Cascadelake-Server-v1" ;;
+    014) TMOE_AMD64_QEMU_CPU_TYPE="Cascadelake-Server-v2" ;;
+    015) TMOE_AMD64_QEMU_CPU_TYPE="Cascadelake-Server-v3" ;;
+    016) TMOE_AMD64_QEMU_CPU_TYPE="Conroe" ;;
+    017) TMOE_AMD64_QEMU_CPU_TYPE="Conroe-v1" ;;
+    018) TMOE_AMD64_QEMU_CPU_TYPE="Cooperlake" ;;
+    019) TMOE_AMD64_QEMU_CPU_TYPE="Cooperlake-v1" ;;
+    020) TMOE_AMD64_QEMU_CPU_TYPE="Denverton" ;;
+    021) TMOE_AMD64_QEMU_CPU_TYPE="Denverton-v1" ;;
+    022) TMOE_AMD64_QEMU_CPU_TYPE="Denverton-v2" ;;
+    023) TMOE_AMD64_QEMU_CPU_TYPE="Dhyana" ;;
+    024) TMOE_AMD64_QEMU_CPU_TYPE="Dhyana-v1" ;;
+    025) TMOE_AMD64_QEMU_CPU_TYPE="EPYC" ;;
+    026) TMOE_AMD64_QEMU_CPU_TYPE="EPYC-IBPB" ;;
+    027) TMOE_AMD64_QEMU_CPU_TYPE="EPYC-Rome" ;;
+    028) TMOE_AMD64_QEMU_CPU_TYPE="EPYC-Rome-v1" ;;
+    029) TMOE_AMD64_QEMU_CPU_TYPE="EPYC-v1" ;;
+    030) TMOE_AMD64_QEMU_CPU_TYPE="EPYC-v2" ;;
+    031) TMOE_AMD64_QEMU_CPU_TYPE="EPYC-v3" ;;
+    032) TMOE_AMD64_QEMU_CPU_TYPE="Haswell" ;;
+    033) TMOE_AMD64_QEMU_CPU_TYPE="Haswell-IBRS" ;;
+    034) TMOE_AMD64_QEMU_CPU_TYPE="Haswell-noTSX" ;;
+    035) TMOE_AMD64_QEMU_CPU_TYPE="Haswell-noTSX-IBRS" ;;
+    036) TMOE_AMD64_QEMU_CPU_TYPE="Haswell-v1" ;;
+    037) TMOE_AMD64_QEMU_CPU_TYPE="Haswell-v2" ;;
+    038) TMOE_AMD64_QEMU_CPU_TYPE="Haswell-v3" ;;
+    039) TMOE_AMD64_QEMU_CPU_TYPE="Haswell-v4" ;;
+    040) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Client" ;;
+    041) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Client-noTSX" ;;
+    042) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Client-v1" ;;
+    043) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Client-v2" ;;
+    044) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Server" ;;
+    045) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Server-noTSX" ;;
+    046) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Server-v1" ;;
+    047) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Server-v2" ;;
+    048) TMOE_AMD64_QEMU_CPU_TYPE="Icelake-Server-v3" ;;
+    049) TMOE_AMD64_QEMU_CPU_TYPE="IvyBridge" ;;
+    050) TMOE_AMD64_QEMU_CPU_TYPE="IvyBridge-IBRS" ;;
+    051) TMOE_AMD64_QEMU_CPU_TYPE="IvyBridge-v1" ;;
+    052) TMOE_AMD64_QEMU_CPU_TYPE="IvyBridge-v2" ;;
+    053) TMOE_AMD64_QEMU_CPU_TYPE="KnightsMill" ;;
+    054) TMOE_AMD64_QEMU_CPU_TYPE="KnightsMill-v1" ;;
+    055) TMOE_AMD64_QEMU_CPU_TYPE="Nehalem" ;;
+    056) TMOE_AMD64_QEMU_CPU_TYPE="Nehalem-IBRS" ;;
+    057) TMOE_AMD64_QEMU_CPU_TYPE="Nehalem-v1" ;;
+    058) TMOE_AMD64_QEMU_CPU_TYPE="Nehalem-v2" ;;
+    059) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G1" ;;
+    060) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G1-v1" ;;
+    061) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G2" ;;
+    062) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G2-v1" ;;
+    063) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G3" ;;
+    064) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G3-v1" ;;
+    065) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G4" ;;
+    066) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G4-v1" ;;
+    067) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G5" ;;
+    068) TMOE_AMD64_QEMU_CPU_TYPE="Opteron_G5-v1" ;;
+    069) TMOE_AMD64_QEMU_CPU_TYPE="Penryn" ;;
+    070) TMOE_AMD64_QEMU_CPU_TYPE="Penryn-v1" ;;
+    071) TMOE_AMD64_QEMU_CPU_TYPE="SandyBridge" ;;
+    072) TMOE_AMD64_QEMU_CPU_TYPE="SandyBridge-IBRS" ;;
+    073) TMOE_AMD64_QEMU_CPU_TYPE="SandyBridge-v1" ;;
+    074) TMOE_AMD64_QEMU_CPU_TYPE="SandyBridge-v2" ;;
+    075) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Client" ;;
+    076) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Client-IBRS" ;;
+    077) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Client-noTSX-IBRS" ;;
+    078) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Client-v1" ;;
+    079) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Client-v2" ;;
+    080) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Client-v3" ;;
+    081) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Server" ;;
+    082) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Server-IBRS" ;;
+    083) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Server-noTSX-IBRS" ;;
+    084) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Server-v1" ;;
+    085) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Server-v2" ;;
+    086) TMOE_AMD64_QEMU_CPU_TYPE="Skylake-Server-v3" ;;
+    087) TMOE_AMD64_QEMU_CPU_TYPE="Snowridge" ;;
+    088) TMOE_AMD64_QEMU_CPU_TYPE="Snowridge-v1" ;;
+    089) TMOE_AMD64_QEMU_CPU_TYPE="Snowridge-v2" ;;
+    090) TMOE_AMD64_QEMU_CPU_TYPE="Westmere" ;;
+    091) TMOE_AMD64_QEMU_CPU_TYPE="Westmere-IBRS" ;;
+    092) TMOE_AMD64_QEMU_CPU_TYPE="Westmere-v1" ;;
+    093) TMOE_AMD64_QEMU_CPU_TYPE="Westmere-v2" ;;
+    094) TMOE_AMD64_QEMU_CPU_TYPE="athlon" ;;
+    095) TMOE_AMD64_QEMU_CPU_TYPE="athlon-v1" ;;
+    096) TMOE_AMD64_QEMU_CPU_TYPE="core2duo" ;;
+    097) TMOE_AMD64_QEMU_CPU_TYPE="core2duo-v1" ;;
+    098) TMOE_AMD64_QEMU_CPU_TYPE="coreduo" ;;
+    099) TMOE_AMD64_QEMU_CPU_TYPE="coreduo-v1" ;;
+    100) TMOE_AMD64_QEMU_CPU_TYPE="kvm32" ;;
+    101) TMOE_AMD64_QEMU_CPU_TYPE="kvm32-v1" ;;
+    102) TMOE_AMD64_QEMU_CPU_TYPE="kvm64" ;;
+    103) TMOE_AMD64_QEMU_CPU_TYPE="kvm64-v1" ;;
+    104) TMOE_AMD64_QEMU_CPU_TYPE="n270" ;;
+    105) TMOE_AMD64_QEMU_CPU_TYPE="n270-v1" ;;
+    106) TMOE_AMD64_QEMU_CPU_TYPE="pentium" ;;
+    107) TMOE_AMD64_QEMU_CPU_TYPE="pentium-v1" ;;
+    108) TMOE_AMD64_QEMU_CPU_TYPE="pentium2" ;;
+    109) TMOE_AMD64_QEMU_CPU_TYPE="pentium2-v1" ;;
+    110) TMOE_AMD64_QEMU_CPU_TYPE="pentium3" ;;
+    111) TMOE_AMD64_QEMU_CPU_TYPE="pentium3-v1" ;;
+    112) TMOE_AMD64_QEMU_CPU_TYPE="phenom" ;;
+    113) TMOE_AMD64_QEMU_CPU_TYPE="phenom-v1" ;;
+    114) TMOE_AMD64_QEMU_CPU_TYPE="qemu32" ;;
+    115) TMOE_AMD64_QEMU_CPU_TYPE="qemu32-v1" ;;
+    116) TMOE_AMD64_QEMU_CPU_TYPE="qemu64" ;;
+    117) TMOE_AMD64_QEMU_CPU_TYPE="qemu64-v1" ;;
+    118) TMOE_AMD64_QEMU_CPU_TYPE="base" ;;
+    119) TMOE_AMD64_QEMU_CPU_TYPE="host" ;;
+    120) TMOE_AMD64_QEMU_CPU_TYPE="max" ;;
+    esac
+    ###############
+    sed -E -i "s@^(CPU_MODEL=).*@\1${TMOE_AMD64_QEMU_CPU_TYPE}@g" ${QEMU_FILE}
+    grep -E --color=auto "^CPU_MODEL=" ${QEMU_FILE}
+    printf "%s\n" "您已将cpu修改为${TMOE_AMD64_QEMU_CPU_TYPE}"
+    printf "%s\n" "修改完成，将在下次启动qemu虚拟机时生效"
+    press_enter_to_return
+    ${RETURN_TO_WHERE}
+}
+############
+tmoe_qemu_main "$@"
+###############################

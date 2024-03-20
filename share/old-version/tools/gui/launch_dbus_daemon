@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+################
+check_sudo() {
+    case $(id -u) in
+    0) unset SUDO ;;
+    *) SUDO="sudo" ;;
+    esac
+}
+set_dbus_env() {
+    DBUS_PID_1="/var/run/dbus/pid"
+    # alpine:
+    DBUS_PID_2="/run/dbus/dbus.pid"
+}
+#---------------
+dbus_daemon_fork() {
+    ${SUDO} dbus-daemon --system --fork 2>/dev/null
+}
+###########
+rm_dbus_pid_file() {
+    ${SUDO} rm -vf ${DBUS_PID_1} 2>/dev/null || ${SUDO} rm -vf ${DBUS_PID_2} 2>/dev/null
+    dbus_daemon_fork
+}
+###########
+dbus_is_not_running() {
+    printf "%s\n" "${RED}Error, ${BLUE}dbus ${YELLOW}is not running${RESET}"
+    printf "%s\n" \
+        "${RED}ERROR${RESET}" \
+        "${BLUE}Dbus ${YELLOW}is not running${RESET}" \
+        "You can set ${BLUE}TMOE_CHROOT=${PURPLE}true${RESET} to force start it."
+}
+check_dbus_daemon() {
+    case ${TMOE_PROOT} in
+    true) [[ -e "/etc/init.d/dbus" ]] || rm_dbus_pid_file ;;
+    esac
+
+    case ${TMOE_CHROOT} in
+    true) rm_dbus_pid_file ;;
+    false) [[ ! -e ${DBUS_PID_1} && ! -e ${DBUS_PID_2} ]] && dbus_is_not_running ;;
+    *)
+        if [[ -e /etc/motd ]]; then
+            if grep -q 'Deploy' /etc/motd 2>/dev/null; then
+                rm_dbus_pid_file
+            else
+                dbus_is_not_running
+            fi
+        fi
+        ;;
+    esac
+}
+service_dbus_start() {
+    if [[ -e /etc/init.d/dbus ]]; then
+        printf "%s\n" "${PURPLE}sudo ${GREEN}service ${BLUE}dbus ${YELLOW}start${RESET}"
+        ${SUDO} service dbus start
+        ${SUDO} service dbus status | head -n 3
+        [[ ! -e ${DBUS_PID_1} && ! -e ${DBUS_PID_2} ]] && check_dbus_daemon
+    else
+        printf "%s\n" "${PURPLE}sudo ${GREEN}systemctl ${BLUE}start ${YELLOW}dbus${RESET}"
+        case ${TMOE_CHROOT} in
+        true | false) check_dbus_daemon ;;
+        *)
+            ${SUDO} systemctl start dbus
+            [[ ! -e ${DBUS_PID_1} && ! -e ${DBUS_PID_2} ]] && check_dbus_daemon
+            ;;
+        esac
+    fi
+}
+################
+show_dbus_status() {
+    if [[ -e ${DBUS_PID_1} ]]; then
+        PID=$(head -n 1 ${DBUS_PID_1})
+        cat <<-EOF
+${GREEN}●${BLUE} dbus.service${RESET} - ${YELLOW}D-Bus System Message Bus${RESET}
+     Loaded: loaded (/lib/systemd/system/dbus.service; static)
+     Active: ${GREEN}active (running)${RESET}
+TriggeredBy: ${GREEN}● ${BLUE}dbus.socket${RESET}
+       Docs: man:dbus-daemon(1)
+   Main PID: ${PID} (dbus-daemon)
+     CGroup: /system.slice/dbus.service
+EOF
+    elif [[ -e ${DBUS_PID_2} ]]; then
+        echo "Dbus pid: $(head -n 1 ${DBUS_PID_2})"
+    else
+        echo "Dbus is not running."
+    fi
+}
+dbus_main() {
+    check_sudo
+    set_dbus_env
+    service_dbus_start
+    show_dbus_status
+}
+################
+dbus_main "$@"

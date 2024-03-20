@@ -1,0 +1,877 @@
+#!/usr/bin/env bash
+cat >"${TMOE_STARTUP_SCRIPT}" <<-ENDOFPROOT
+	#!/usr/bin/env bash
+	#------------------
+	# user & work dir
+
+	# You can specify a user. Default is root
+	# 您可以指定用户，例如root或ubuntu，默认为root
+	# Sie können einen Benutzer angeben
+	PROOT_USER="root"
+
+	# If the value is "default", the home directory will be auto-detected. You can enter an absolute path, for example, "/home/xxx".
+	HOME_DIR="default"
+
+	# Set the initial working directory to path. Some programs expect to be launched from a given directory but do not perform  any  chdir  by  them‐selves.  This option avoids the need for running a shell and then entering the directory manually.
+	# 启动容器后进入的目录，默认为用户的主目录。请注意: 若您的默认 login shell 为 bash/zsh, 则请在“环境变量与登录项管理”处修改entrypoint。
+	WORK_DIR="default"
+	#------------------
+	# binary file & compatibility
+
+	: <<-'EOF_compatibility_notes'
+	In some environments, you may encounter some strange compatibility issues.
+	For example: In proot(host: android, container: gnu/linux, arch: arm64), 
+	microsoft dotNET 6.0 may have "csc.dll exited with code 139" or "loader not found" when running a project.
+	Note: dotNET 7 does not have this problem.
+
+	In general, you should not enable this mode!!!
+
+	Enabling this mode forces the values of other variables to be overwritten.
+
+	if dot_net_6_compatible_mode {
+	    proot_bin = "compatibility";
+	    share_proot_loader = true;
+	};
+	By the way, if it cannot find the dotnet bin. You should create a symlink in the container manually:
+	DOTNET_ROOT=\${DOTNET_ROOT:-\$HOME/.dotnet} \
+	&& mkdir -pv "${DEBIAN_CHROOT}"/\${DOTNET_ROOT} \
+	&& rm -rv "${DEBIAN_CHROOT}"/\${DOTNET_ROOT} 
+	ln -svf \${DOTNET_ROOT} "${DEBIAN_CHROOT}"/\${DOTNET_ROOT}
+	EOF_compatibility_notes
+	# true or false
+	DOT_NET_6_COMPATIBLE_MODE=false
+
+	: <<-'EOF_proot_bin_notes'
+	您可以自行编译proot, 并指定其二进制文件所在路径。当此变量值为"default"时，将使用系统默认proot二进制文件所在路径；当其为"termux"时，将使用 "\${PREFIX}/bin/proot"。
+	您也可以使用绝对路径, 例如"/usr/local/bin/proot"
+	You can specify the path where the binary file of proot is located. If the value is "default", it will use the default path of the system.
+	If the value is "32", it will use proot 32bit-version. If your host is arm64, and you want to run an i386/armhf container, then you can modify it to "32".
+
+	Note：若内核支持 binfmt_misc，且 host os 已经配置过 binfmt_misc 的 register，则您无需在此处进行额外的配置，且 container 没有那么多奇奇怪怪的问题。
+
+	If your host os is already configured with binfmt_misc register, you don't have to worry about that much and the container doesn't have that many strange problems.
+
+	    // host_os == "android" && host_arch == "arm64":
+	    let (proot_bin_arch, qemu_bin_arch) = match (host_arch, host_os, container_arch) {
+	        ("arm64", "android", "i386") => ("proot_armhf", "qemu-user-i386-latest_armhf"),
+	        ("arm64", "android", "amd64") => ("proot_arm64", "qemu-user-x86_64-latest_arm64"),
+	        ("arm64", "android", "riscv64") => {
+	            if android_version >= 10 { eprintln!("Unfortunately, there may be a problem with containers running riscv64 on the current system."); }
+	            ("proot_arm64", "qemu-user-riscv64-latest_arm64")
+	        },
+	        ("arm64", "android", "armhf") => ("proot_armhf", "noqemu"),
+	        ("arm64", "android", "arm64") => ("proot_arm64", "noqemu"),
+	        ("arm64(without aarch32 support)", "android", "armhf") => ("proot_arm64", "qemu-user-arm-latest_arm64"),
+	    };
+
+	You can also enter an absolute path, for example, "\${PREFIX}/bin/proot"
+	    let proot_bin = match PROOT_BIN {
+	        "system" | "default" => "proot",
+	        "termux" => "${PREFIX}/bin/proot",
+	        "32" => PROOT_32_TERMUX_BIN, // "32" is &str, not i32/isize 
+	        "compatibility" => PROOT_COMPATIBLE_MODE_BIN,
+	        path @ _ => path,
+	    };
+	EOF_proot_bin_notes
+	# Optional values: "default", "compatibility", "system", "termux", "32", or an absolute path.
+	PROOT_BIN="default"
+
+	# only for android (host_arch = arm64, container_arch = arm64)
+	# If you want to use COMPATIBLE_MODE on other platforms, compile proot manually and specify the path instead of using the default path.
+	# if proot_bin = "compatibility", proot_bin = "\$proot_compatible_mode_bin"
+	# value: an absolute path.
+	PROOT_COMPATIBLE_MODE_BIN="${TMOE_LINUX_DIR}/lib/data/data/com.termux/files/usr/bin/proot"
+
+	# if proot_bin = "32" && host_os = "android" {proot_bin = "\$proot_32_termux_bin"}
+	# value: an absolute path.
+	# PROOT_32_DEBIAN_BIN="${TMOE_LINUX_DIR}/lib32/usr/bin/proot"
+	PROOT_32_TERMUX_BIN="${TMOE_LINUX_DIR}/lib32/data/data/com.termux/files/usr/bin/proot"
+
+	# Some environments may have loader errors, for example: Microsoft dotNET 6.
+	# In this case, you need to share the proot loader.
+	# mount-src: proot_loader, mount-target: proot_loader
+	# true or false
+	SHARE_PROOT_LOADER=false
+
+	# proot loader
+	# if proot_bin = "default|system|path" {proot_loader = "\$proot_libexec_loader"}
+	# Optional values: "default", "system", or an absolute path.
+	PROOT_LIBEXEC_LOADER="default"
+
+	# only for android (host_arch = arm64, container_arch = "armhf|armel")
+	# if proot_bin = "32" {proot_loader = "\$proot_32_termux_loader"}
+	# value: an absolute path.
+	PROOT_32_TERMUX_LOADER="${TMOE_LINUX_DIR}/lib32/data/data/com.termux/files/usr/libexec/proot/loader"
+
+	# only for android (host_arch = arm64, container_arch = arm64)
+	# if proot_bin = "compatibility" {proot_loader = "\$compatible_mode_loader"}
+	# value: an absolute path.
+	COMPATIBLE_MODE_LOADER="${TMOE_LINUX_DIR}/lib/data/data/com.termux/files/usr/libexec/proot/loader"
+
+	# if proot_bin = "default|system|path" {ld_library_path = "\$ld_lib_path"}
+	LD_LIB_PATH="default"
+
+	# if proot_bin = "32" {ld_library_path = "\$proot_32_termux_ld_lib_path"}
+	# value: an absolute path.
+	PROOT_32_TERMUX_LD_LIB_PATH="${TMOE_LINUX_DIR}/lib32/data/data/com.termux/files/usr/lib"
+
+	# if proot_bin = "compatibility" {ld_library_path = "\$compatible_mode_ld_lib_path"}
+	COMPATIBLE_MODE_LD_LIB_PATH="${TMOE_LINUX_DIR}/lib/data/data/com.termux/files/usr/lib" 
+
+	ROOTFS_DIR="${DEBIAN_CHROOT}"
+	PROOT_PROC_DIR="\${ROOTFS_DIR}/usr/local/etc/tmoe-linux/proot_proc"
+	#------------------
+	# environment
+
+	# Load the environment variable file when starting the container. Default is true.
+	LOAD_ENV_FILE=true
+	CONTAINER_ENV_FILE="\${ROOTFS_DIR}/usr/local/etc/tmoe-linux/environment/container.env"
+
+	# Default is true. The priority of the configuration file is higher than the current configuration.
+	# 当该值为true时，当前配置信息将会被配置文件里的内容所覆盖。
+	LOAD_PROOT_CONF=true
+	PROOT_CONF_FILE="${CONFIG_FOLDER}/proot_global.conf"
+	#------------------
+	# proot configuration
+
+	# Kill all processes on command exit. When the executed command leaves orphean or detached processes around, proot waits until all processes possibly terminate. This option forces the immediate termination of all tracee processes when the main command exits. Default is true.
+	# 退出容器时, 自动杀掉所有进程, 默认为true
+	KILL_ON_EXIT=true
+
+	# Handles System V IPC syscalls (shmget, semget, msgget, etc.) syscalls inside proot. IPC is handled inside proot and launching 2 proot instances will lead to 2 different IPC Namespaces. Default is true.
+	PROOT_SYSVIPC=true
+
+	# Correct the size returned from lstat for symbolic links. Default is true.
+	PROOT_L=true
+
+	# Hide files and directories starting with '.proot.'. Default is false.
+	# If your container is arch, you can modify the value to true.
+	# If you find that some folders cannot be deleted in the container, please modify the value to false.
+	PROOT_H=false
+
+	# Modify bindings to protected ports to use a higher port number. Default is false.
+	PROOT_P=false
+
+	# 伪造内核版本信息, 默认为false, 若将此变量值修改为true, 则启用该功能
+	# Default is false.
+	FAKE_KERNEL=false
+
+	# Make current kernel appear as kernel release *string*.
+	KERNEL_RELEASE="5.10.105-3-cloud-${ARCH_TYPE}"
+
+	# Replace hard links with symlinks, pretending they are really hardlinks. Emulates hard links with symbolic links when SELinux policies do not allow hard links. Default is true.
+	LINK_TO_SYMLINK=true
+
+	# export PROOT_NO_SECCOMP=1
+
+	# proot调试输出, 默认为false
+	# Default is false.
+	PROOT_DEBUG=false
+
+	# Set the level of debug information to *value*. The higher the integer value is, the more detailed debug information is printed to the standard error stream. A negative value makes PRoot quiet except on fatal errors.
+	VERBOSE_LEVEL=2
+
+	# Default is false.
+	# 旧系统/旧版本兼容模式
+	# Set the values of PROOT_L, PROOT_P and PROOT_SYSVIPC to false, and set FAKE_KERNEL to true.
+	OLD_ANDROID_VERSION_COMPATIBILITY_MODE=false
+	#------------------
+	# qemu
+
+	# Optional values: "Android", "linux"
+	HOST_DISTRO="${LINUX_DISTRO}"
+
+	# Host architecture
+	HOST_ARCH="${TRUE_ARCH_TYPE}"
+
+	CONTAINER_DISTRO="${CONTAINER_DISTRO}"
+	CONTAINER_NAME="${DEBIAN_FOLDER}"
+
+	# 容器架构
+	# Optional values: "amd64", "i386", "arm64", "armhf", "armel", "mipsel", "mips64el", "ppc64el", "s390x", "riscv64"
+	CONTAINER_ARCH="${ARCH_TYPE}"
+
+	# Optional values: "default", "x86_64", "i386", "aarch64", "aarch64_be", "arm", "armeb", "mipsel", "mips64el", "s390x", "riscv64"
+	QEMU_ARCH="default"
+
+	# After skipping, qemu will be called forcibly.
+	# 跳过qemu版本和架构的检测，并强制调用qemu。如需启用本选项，则请手动修改 QEMU_ARCH 的值为指定架构。
+	SKIP_QEMU_DETECTION=false
+
+	# 当该值为true时，使用静态编译的版本。若该值为false，且遇到了lib库问题，则请挂载/system和/apex等目录。
+	# If the value is false, please install qemu-user manually, for example, apt install qemu-user-i386 qemu-user-x86_64 qemu-user-aarch64 qemu-user-arm
+	QEMU_USER_STATIC=true
+
+	# If your host is arm64-android, and you are using 32bit proot, then enable qemu32.
+	QEMU_32_ENABLED=false
+
+	QEMU_USER_STATIC_PATH="${TMOE_LINUX_DIR}/lib/usr/bin"
+	QEMU_USER_STATIC_32_PATH="${TMOE_LINUX_DIR}/lib32/usr/bin"
+
+	# 默认会自动根据宿主机架构和容器架构来判断需要调用的qemu版本, 您可以指定特定版本的qemu二进制文件。
+	# You can enter an absolute path, for example, "\${PREFIX}/bin/qemu-x86_64"
+	QEMU_USER_BIN="default"
+	#------------------
+	# exa(armhf -> i386)
+
+	# Only for testing. Default is false.
+	# Only applicable to i386 environment. If you enable it, then QEMU will be automatically disabled. In addition, some mount settings will also be automatically disabled.
+	# 此功能与qemu冲突，如需启用qemu, 则请将该值修改为false。
+	# 此功能仅供测试！！！
+	EXA_ENABLED=false
+
+	EXA_PATH="${TMOE_LINUX_DIR}/lib32/usr/bin"
+	EXA_PREFIX="\${ROOTFS_DIR}"
+
+	# FORK_CONTALLER=false
+
+	# External IPC emulation is used on Android only. Default is false.
+	# IPC_EMU_SER=false
+
+	# pels,ansep,tlsasws,tsi,spd
+	VFS_HACKS="tlsasws,tsi,spd"
+
+	# es, ed
+	SOCKET_PATH_SUFFIX=""
+
+	VPATHS_LIST="/dev/null"
+	VFS_KIND="guest-first"
+	#------------------
+	# shells
+
+	# let mut shells: Vec<&str> = vec!["zsh", "fish", "bash", "ash", "su"];
+	# The default login shell is zsh.
+	# 默认登录shell是zsh
+	# Die Standard-Login-Shell ist zsh.
+	DEFAULT_LOGIN_SHELL_0="/bin/zsh"
+
+	# The lower the number, the higher the priority.
+	DEFAULT_LOGIN_SHELL_1="/bin/fish"
+	DEFAULT_LOGIN_SHELL_2="/bin/bash"
+	DEFAULT_LOGIN_SHELL_3="/bin/ash"
+	DEFAULT_LOGIN_SHELL_4="/bin/su"
+	# /usr/local/powershell/pwsh
+
+	# For zsh & bash, "-l" = "--login"
+	# For powershell & nushell, they do not have the "-l" arg.
+	LOGIN_SHELL_ARG="-l"
+	#------------------
+	# mounts
+
+	# global mount configuration. If the value of "MOUNT_SD" is empty, the file is loaded.
+	SD_CONF_FILE="${CONFIG_FOLDER}/rootless/mount_sd.conf"
+
+	# true or false
+	# 挂载sd, 可选 true 或 false。 若该值为空，则从全局配置文件"\$SD_CONF_FILE"中读取。
+	MOUNT_SD=""
+
+	# The lower the number, the higher the priority. The highest priority directory will be mounted to the mount point.
+	# SD_DIR为宿主机sd目录，SD_MOUNT_POINT为容器内的挂载点。优先级别高，且存在相应目录时，才会被挂载（SD_DIR_0的优先级最高）。默认挂载点为容器内部的"/media/sd" 
+
+	# source 
+	SD_DIR_0="/storage/self/primary/Download"
+	SD_DIR_1="/sdcard/Download"
+	SD_DIR_2="/storage/emulated/0/Download"
+	SD_DIR_3="\${HOME}/sd/Download"
+	SD_DIR_4="\${HOME}/Downloads"
+	SD_DIR_5="\${HOME}/Download"
+
+	# target
+	SD_MOUNT_POINT="/media/sd"
+
+
+	# global mount configuration. If the value of "MOUNT_TERMUX" is empty, the file is loaded.
+	TERMUX_CONF_FILE="${CONFIG_FOLDER}/rootless/mount_termux.conf"
+
+	MOUNT_TERMUX=""
+	TERMUX_DIR="/data/data/com.termux/files"
+	TERMUX_MOUNT_POINT="/media/termux"
+
+	# global mount configuration. If the value of "MOUNT_TF" is empty, the file is loaded.
+	TF_CONF_FILE="${CONFIG_FOLDER}/rootless/mount_tf.conf"
+
+	# true or false
+	MOUNT_TF=""
+
+	# The value of TF_CARD_LINK is a symbolic link file.
+	# TF_CARD_LINK的值为一个软链接文件
+	TF_CARD_LINK="\${HOME}/storage/external-1"
+	TF_MOUNT_POINT="/media/tf"
+
+	# global mount configuration. If the value of "MOUNT_STORAGE" is empty, the file is loaded.
+	STORAGE_CONF_FILE="${CONFIG_FOLDER}/rootless/mount_storage.conf"
+
+	# If the value of "MOUNT_STORAGE" is "false", the relevant directory will not be mounted.
+	# true or false
+	MOUNT_STORAGE=""
+	STORAGE_DIR="/storage"
+	STORAGE_MOUNT_POINT="/storage"
+
+	MOUNT_GITSTATUS=true
+	GITSTATUS_DIR="${CONFIG_FOLDER}/gitstatus"
+	GITSTATUS_MOUNT_POINT="/root/.cache/gitstatus"
+
+	MOUNT_TMP=false
+	TMP_SOURCE_DIR="${TMPDIR}"
+	TMP_MOUNT_POINT="/tmp"
+
+	MOUNT_SYSTEM=true
+	SYSTEM_DIR="/system"
+
+	MOUNT_APEX=true
+	APEX_DIR="/apex"
+
+	MOUNT_SYS=false
+	SYS_DIR="/sys"
+
+	MOUNT_DEV=true
+	DEV_DIR="/dev"
+	MOUNT_SHM_TO_TMP=true
+	MOUNT_URANDOM_TO_RANDOM=true
+	MOUNT_DEV_FD=true
+	MOUNT_DEV_STDIN=true
+	MOUNT_DEV_STDOUT=true
+	MOUNT_DEV_STDERR=true
+	MOUNT_DEV_TTY=true
+
+	MOUNT_PROC=true
+	PROC_DIR="/proc"
+	FAKE_PROOT_PROC=true
+	# Default is true.
+
+	MOUNT_CAP_LAST_CAP=true
+	# /dev/null:/proc/sys/kernel/cap_last_cap
+	CAP_LAST_CAP_SOURCE="/dev/null"
+	CAP_LAST_CAP_MOUNT_POINT="/proc/sys/kernel/cap_last_cap"
+	#------------------
+	NUM_OF_MOUNTS=2
+	# 默认为2, 若您将该值修改为5, 则请手动添加MOUNT_SOURCE_3,MOUNT_SOURCE_4,MOUNT_SOURCE_5,MOUNT_POINT_3,MOUNT_POINT_4 & MOUNT_POINT_5 变量。
+	# If you want to mount hundreds of directories, then you need to add variables manually.
+	#------------------
+	# MOUNT_SOURCE_1为第一个挂载源，MOUNT_POINT_1 为第一个挂载点，MOUNT_SOURCE_2为第二个挂载源 ...
+	# 举个例子，假如您想将/storage/emulated/0/Download目录挂载至容器内部的/media/down, 那么MOUNT_SOURCE_1的值为"/storage/emulated/0/Download", MOUNT_POINT_1的值为"/media/down"
+	# For example, if you want to mount the /storage/emulated/0/DCIM directory to /media/pic, then the value of MOUNT_SOURCE_2 is "/storage/emulated/0/DCIM", and the value of MOUNT_POINT_2 is "/media/pic"
+
+	MOUNT_SOURCE_1=""
+	MOUNT_POINT_1=""
+	#---
+	MOUNT_SOURCE_2=""
+	MOUNT_POINT_2=""
+	#---
+	# MOUNT_SOURCE_3=""
+	# MOUNT_POINT_3=""
+	# #---
+	# MOUNT_SOURCE_4=""
+	# MOUNT_POINT_4=""
+	# #---
+	# MOUNT_SOURCE_5=""
+	# MOUNT_POINT_5=""
+	# #---
+	# MOUNT_SOURCE_6=""
+	# MOUNT_POINT_6=""
+	# #---
+	# MOUNT_SOURCE_7=""
+	# MOUNT_POINT_7=""
+	# #---
+	# MOUNT_SOURCE_8=""
+	# MOUNT_POINT_8=""
+	# #---
+	# MOUNT_SOURCE_9=""
+	# MOUNT_POINT_9=""
+	# #---
+	# MOUNT_SOURCE_10=""
+	# MOUNT_POINT_10=""
+	# #---
+	# MOUNT_SOURCE_11=""
+	# MOUNT_POINT_11=""
+	# #---
+	# MOUNT_SOURCE_12=""
+	# MOUNT_POINT_12=""
+	#------------------
+	TMOE_LOCALE_FILE="${CONFIG_FOLDER}/locale.txt"
+	DEFAULT_SHELL_CONF="${CONFIG_FOLDER}/default_shell.conf"
+	PROC_FD_PATH="/proc/self/fd"
+	HOST_NAME_FILE="\${ROOTFS_DIR}/etc/hostname"
+	#------------------
+	main() {
+	    start_tmoe_gnu_linux_container
+	}
+	check_qemu_arch() {
+	    TMOE_QEMU=true
+	    case "\${CONTAINER_ARCH}" in
+	    i386)
+	        case \${HOST_ARCH} in
+	        amd64 | i386) TMOE_QEMU=false ;;
+	        *) TMOE_QEMU_ARCH="i386" ;;
+	        esac
+	        ;;
+	    amd64) TMOE_QEMU_ARCH="x86_64" ;;
+	    arm64) TMOE_QEMU_ARCH="aarch64" ;;
+	    armhf)
+	        case \${HOST_ARCH} in
+	        arm64 | armhf) TMOE_QEMU=false ;;
+	        *) TMOE_QEMU_ARCH="arm" ;;
+	        esac
+	        ;;
+	    armel)
+	        case \${HOST_ARCH} in
+	        arm64 | armhf | armel) TMOE_QEMU=false ;;
+	        *) TMOE_QEMU_ARCH="armeb" ;;
+	        esac
+	        ;;
+	    ppc64el) TMOE_QEMU_ARCH="ppc64le" ;;
+	    s390x) TMOE_QEMU_ARCH="s390x" ;;
+	    mipsel) TMOE_QEMU_ARCH="mipsel" ;;
+	    mips64el) TMOE_QEMU_ARCH="mips64el" ;;
+	    riscv64) TMOE_QEMU_ARCH="riscv64" ;;
+	    esac
+	}
+	check_qemu32_path() {
+	    case \${QEMU_32_ENABLED} in
+	    true) QEMU_PATH="\${QEMU_USER_STATIC_32_PATH}/" ;;
+	    false) QEMU_PATH="\${QEMU_USER_STATIC_PATH}/" ;;
+	    esac
+	    [[ -e \${QEMU_PATH}qemu-x86_64-static ]] || unset QEMU_PATH
+	}
+	check_qemu_bin() {
+	    case \${QEMU_USER_BIN} in
+	    default | "")
+	        case \${QEMU_USER_STATIC} in
+	        true) QEMU_BIN="\${QEMU_PATH}qemu-\${TMOE_QEMU_ARCH}-static" ;;
+	        false) QEMU_BIN="qemu-\${TMOE_QEMU_ARCH}" ;;
+	        esac
+	        ;;
+	    *) QEMU_BIN="\${QEMU_USER_BIN}" ;;
+	    esac
+	}
+	#------------------
+	check_exa_var() {
+	    case \${CONTAINER_ARCH} in
+	    i386) ;;
+	    *) unset EXA_ENABLED ;;
+	    esac
+	    case \${EXA_ENABLED} in
+	    true) unset MOUNT_TERMUX MOUNT_APEX MOUNT_SYSTEM MOUNT_SYS ;;
+	    *) unset EXA_PREFIX ;;
+	    esac
+	}
+	#------------------
+	load_global_conf(){
+	    if [[ \${LOAD_PROOT_CONF} = true && -r \${PROOT_CONF_FILE} ]]; then
+	        source \${PROOT_CONF_FILE}
+	    fi
+		if [[ -z \${MOUNT_SD} && -r \${SD_CONF_FILE} ]];then
+	        source \${SD_CONF_FILE}
+		fi
+		if [[ -z \${MOUNT_TERMUX} && -r \${TERMUX_CONF_FILE} ]];then
+	        source \${TERMUX_CONF_FILE}
+		fi
+		if [[ -z \${MOUNT_TF} && -r \${TF_CONF_FILE} ]];then
+	        source \${TF_CONF_FILE}
+		fi
+		if [[ -z \${MOUNT_STORAGE} && -r \${STORAGE_CONF_FILE} ]];then
+	        source \${STORAGE_CONF_FILE}
+		fi
+	}
+	get_proot_comp_mode_deb(){
+	    case \${HOST_DISTRO} in
+	    Android)
+	    if [[ \${HOST_ARCH} = arm64 && ! -e \${PROOT_LOADER} ]];then
+	        echo "ERROR, your proot_loader is missing."
+	        PROOT_LOADER="${TMOE_LINUX_DIR}/lib/data/data/com.termux/files/usr/libexec/proot/loader"
+	        mkdir -pv "${TMOE_LINUX_DIR}/lib/"
+	        cd "${TMOE_LINUX_DIR}/lib/"
+	        curl -Lo proot.deb l.tmoe.me/proot-aarch64 || echo "Sorry, unable to use compatible mode."
+	        apt-get download libtalloc
+	        for i in ./libtalloc*.deb ./proot*.deb; do
+	            dpkg-deb -X \${i} ./
+	            rm -fv \${i}
+	        done
+	        cd -
+	    fi
+	    ;;
+	    esac
+	}
+	set_proot_bin_and_loader_env() {
+	    unset TMOE_LD_LIB_PATH
+	    case "\${PROOT_BIN}" in
+	    "" | system | default) PROOT_PROGRAM=proot ;;
+	    termux | prefix) PROOT_PROGRAM="\${PREFIX}/bin/proot" ;;
+	    compatibility)
+	        PROOT_PROGRAM="\${PROOT_COMPATIBLE_MODE_BIN}"
+	        SHARE_PROOT_LOADER=true
+	        PROOT_LOADER="\${COMPATIBLE_MODE_LOADER}"
+	        LD_LIB_PATH="\${COMPATIBLE_MODE_LD_LIB_PATH}"
+			# [[ -e \$COMPATIBLE_MODE_LD_LIB_PATH ]] || unset COMPATIBLE_MODE_LD_LIB_PATH
+	        get_proot_comp_mode_deb
+	        ;;
+	    32)
+	        case \${HOST_DISTRO} in
+	        Android)
+	            PROOT_PROGRAM="\${PROOT_32_TERMUX_BIN}"
+	            PROOT_LOADER="\${PROOT_32_TERMUX_LOADER}"
+	            LD_LIB_PATH="\${PROOT_32_TERMUX_LD_LIB_PATH}"
+	            ;;
+	        *) PROOT_PROGRAM=proot ;;
+	        esac
+	        ;;
+	    *) PROOT_PROGRAM="\${PROOT_BIN}" ;;
+	    esac
+	    case \${PROOT_LOADER} in
+	    "")
+	        case "\${PROOT_LIBEXEC_LOADER}" in
+	        default | system | "") ;;
+	        *) PROOT_LOADER="\${PROOT_LIBEXEC_LOADER}" ;;
+	        esac
+	        ;;
+	    esac
+	    case "\${LD_LIB_PATH}" in
+	    default | system | "") ;;
+	    *)
+	         case "\${LD_LIBRARY_PATH}" in
+	         "") TMOE_LD_LIB_PATH="\${LD_LIB_PATH}" ;;
+	         *) TMOE_LD_LIB_PATH="\${LD_LIB_PATH}:\${LD_LIBRARY_PATH}" ;;
+	         esac
+	         ;;
+	    esac
+	}
+	#----------------
+	start_tmoe_gnu_linux_container() {
+	    load_global_conf
+	    unset LD_PRELOAD PROOT_UID PROOT_GID PROOT_HOME CONTAINER_BIN_PATH
+	    check_exa_var
+		set_proot_bin_and_loader_env
+	    #------------------
+	    case \${PROOT_USER} in
+	    "" | root) ;;
+	    *)
+	        PROOT_UID=\$(grep "^\${PROOT_USER}:" \${ROOTFS_DIR}/etc/passwd | awk -F ':' '{print \$3}')
+	        PROOT_GID=\$(grep "^\${PROOT_USER}:" \${ROOTFS_DIR}/etc/passwd | awk -F ':' '{print \$4}')
+	        ;;
+	    esac
+	    if [[ -z \${PROOT_UID} ]]; then
+	        PROOT_UID=0
+	        PROOT_GID=0
+	    fi
+	    case \${HOME_DIR} in
+	    default | "")
+	        case \${PROOT_USER} in
+	        root | "") PROOT_HOME="/root" ;;
+	        *)
+	            PROOT_HOME=\$(grep "^\${PROOT_USER}:" \${ROOTFS_DIR}/etc/passwd | awk -F ':' '{print \$6}')
+	            [[ -n \${PROOT_HOME} ]] || PROOT_HOME="/home/\${PROOT_USER}"
+	            ;;
+	        esac
+	        ;;
+	    *) PROOT_HOME="\${HOME_DIR}" ;;
+	    esac
+	    if [[ \${PROOT_USER} = root || -z \${PROOT_USER} ]]; then
+	        set -- "\${@}" "--root-id"
+	    else
+	        set -- "\${@}" "--change-id=\${PROOT_UID}:\${PROOT_GID}"
+	    fi
+
+	    if [[ \${EXA_ENABLED} != true ]]; then
+	        if [[ \${WORK_DIR} = default || -z \${WORK_DIR} ]]; then
+	            set -- "\${@}" "--pwd=\${PROOT_HOME}"
+	        else
+	            set -- "\${@}" "--pwd=\${WORK_DIR}"
+	        fi
+	    else
+	        set -- "\${@}" "--pwd=/"
+	    fi
+	    [[ \${EXA_ENABLED} = true ]] || set -- "\${@}" "--rootfs=\${ROOTFS_DIR}"
+	    if [[ "\${HOST_DISTRO}" = 'Android' ]]; then
+	        if [[ \${MOUNT_SYSTEM} = true ]]; then
+	            if [[ -x "\${SYSTEM_DIR}" ]]; then
+	                set -- "\${@}" "--mount=\${SYSTEM_DIR}"
+	            fi
+	        fi
+	        if [[ \${MOUNT_APEX} = true ]]; then
+	            if [[ -x "\${APEX_DIR}" ]]; then
+	                set -- "\${@}" "--mount=\${APEX_DIR}"
+	            fi
+	        fi
+	        if [[ \${KILL_ON_EXIT} = true ]]; then
+	            set -- "\${@}" "--kill-on-exit"
+	        fi
+	        if [[ \${MOUNT_TF} = true ]]; then
+	            if [[ -L "\${TF_CARD_LINK}" ]]; then
+	                TRUE_TF_CARD=\$(readlink \${TF_CARD_LINK})
+	                if [[ -e "\${TRUE_TF_CARD}" ]]; then
+	                    set -- "\${@}" "--mount=\${TRUE_TF_CARD}:\${EXA_PREFIX}\${TF_MOUNT_POINT}"
+	                fi
+	            fi
+	        fi
+	        if [[ \${MOUNT_STORAGE} = true ]]; then
+	            if [[ -x "\${STORAGE_DIR}" ]]; then
+	                set -- "\${@}" "--mount=\${STORAGE_DIR}:\${EXA_PREFIX}\${STORAGE_MOUNT_POINT}"
+	            fi
+	        fi
+	        if [[ \${MOUNT_TERMUX} = true ]]; then
+	            if [[ -x "\${TERMUX_DIR}/home" ]]; then
+	                set -- "\${@}" "--mount=\${TERMUX_DIR}:\${EXA_PREFIX}\${TERMUX_MOUNT_POINT}"
+	            fi
+	        fi
+	        if [[ \${OLD_ANDROID_VERSION_COMPATIBILITY_MODE} = true ]]; then
+	            PROOT_P=false && PROOT_L=false && PROOT_SYSVIPC=false && FAKE_KERNEL=true
+	        fi
+
+	        [[ \${SHARE_PROOT_LOADER} != true ]] || set -- "\${@}" "--mount=\${PROOT_LOADER}:\${EXA_PREFIX}\${PROOT_LOADER}"
+
+	        [[ \${PROOT_SYSVIPC} != true ]] || set -- "\${@}" "--sysvipc"
+	        [[ \${PROOT_L} != true ]] || set -- "\${@}" "-L"
+	        [[ \${PROOT_H} != true ]] || set -- "\${@}" "-H"
+	        [[ \${PROOT_P} != true ]] || set -- "\${@}" "-p"
+	        [[ \${LINK_TO_SYMLINK} != true ]] || set -- "\${@}" "--link2symlink"
+	    fi
+	    #------------------
+	    [[ \${FAKE_KERNEL} != true ]] || set -- "\${@}" "--kernel-release=\${KERNEL_RELEASE}"
+	    [[ \${PROOT_DEBUG} != true ]] || set -- "\${@}" "--verbose=\${VERBOSE_LEVEL}"
+	    if [[ \${MOUNT_PROC} = true ]]; then
+	        set -- "\${@}" "--mount=\${PROC_DIR}:\${EXA_PREFIX}\${PROC_DIR}"
+	    fi
+	    if [[ \${MOUNT_DEV} = true ]]; then
+	        set -- "\${@}" "--mount=\${DEV_DIR}:\${EXA_PREFIX}\${DEV_DIR}"
+	        [[ \${MOUNT_SHM_TO_TMP} != true ]] || set -- "\${@}" "--mount=\${ROOTFS_DIR}/tmp:\${EXA_PREFIX}/dev/shm"
+	        [[ \${MOUNT_URANDOM_TO_RANDOM} != true ]] || set -- "\${@}" "--mount=\${DEV_DIR}/urandom:\${EXA_PREFIX}/dev/random"
+	        [[ \${MOUNT_DEV_FD} != true ]] || set -- "\${@}" "--mount=\${PROC_FD_PATH}:\${EXA_PREFIX}/dev/fd"
+	        [[ \${MOUNT_DEV_STDIN} != true ]] || set -- "\${@}" "--mount=\${PROC_FD_PATH}/0:\${EXA_PREFIX}/dev/stdin"
+	        [[ \${MOUNT_DEV_STDOUT} != true ]] || set -- "\${@}" "--mount=\${PROC_FD_PATH}/1:\${EXA_PREFIX}/dev/stdout"
+	        [[ \${MOUNT_DEV_STDERR} != true ]] || set -- "\${@}" "--mount=\${PROC_FD_PATH}/2:\${EXA_PREFIX}/dev/stderr"
+	        [[ \${MOUNT_DEV_TTY} != true ]] || set -- "\${@}" "--mount=\${DEV_DIR}/null:\${EXA_PREFIX}/dev/tty0"
+	    fi
+
+	    if [[ \${MOUNT_SYS} = true ]]; then
+	        if [[ -x "\${SYS_DIR}" ]]; then
+	            set -- "\${@}" "--mount=\${SYS_DIR}"
+	        fi
+	    fi
+
+	    if [[ \${MOUNT_TMP} = true ]]; then
+	        if [[ -x "\${TMP_SOURCE_DIR}" ]]; then
+	            set -- "\${@}" "--mount=\${TMP_SOURCE_DIR}:\${EXA_PREFIX}\${TMP_MOUNT_POINT}"
+	        fi
+	    fi
+
+	    if [[ \${MOUNT_GITSTATUS} = true ]]; then
+	        if [[ -x "\${GITSTATUS_DIR}" ]]; then
+	            set -- "\${@}" "--mount=\${GITSTATUS_DIR}:\${EXA_PREFIX}\${GITSTATUS_MOUNT_POINT}"
+	        fi
+	    fi
+
+	    if [[ \${MOUNT_CAP_LAST_CAP} = true ]]; then
+	        set -- "\${@}" "--mount=\${CAP_LAST_CAP_SOURCE}:\${EXA_PREFIX}\${CAP_LAST_CAP_MOUNT_POINT}"
+	    fi
+	    #------------------
+	    if [[ \${MOUNT_SD} = true ]]; then
+	        for i in "\${SD_DIR_0}" "\${SD_DIR_1}" "\${SD_DIR_2}" "\${SD_DIR_3}" "\${SD_DIR_4}" "\${SD_DIR_5}"; do
+	            if [[ -x \${i} ]]; then
+	                set -- "\${@}" "--mount=\${i}:\${EXA_PREFIX}\${SD_MOUNT_POINT}"
+	                break
+	            fi
+	        done
+	    fi
+	    for ((i = 1; i <= \${NUM_OF_MOUNTS}; i++)); do
+	        MOUNT_SOURCE="MOUNT_SOURCE_\${i}"
+	        MOUNT_POINT="MOUNT_POINT_\${i}"
+	        if [[ -n \${!MOUNT_SOURCE} && -x \${!MOUNT_SOURCE} ]]; then
+	            set -- "\${@}" "--mount=\${!MOUNT_SOURCE}:\${EXA_PREFIX}\${!MOUNT_POINT}"
+	        fi
+	    done
+	    #------------------
+	    #The files in the /proc directory will be automatically detected during installation. If your host does not have permission to read them, there is no " #" before set.
+	    #不同系统对文件权限的限制可能有所区别，以下文件在安装时会自动检测，仅当宿主机无权读取时，才会去除set前的注释符号。
+	    if [[ "\${FAKE_PROOT_PROC}" = 'true' ]]; then
+	        ##test01#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/.tmoe-container.stat:\${EXA_PREFIX}/proc/stat"
+	        ##test02#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/.tmoe-container.version:\${EXA_PREFIX}/proc/version"
+	        if [[ -e "\${PROOT_PROC_DIR}/uptime" ]]; then
+	            printf "%s" ""
+	            ##test04#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/bus:\${EXA_PREFIX}/proc/bus"
+	            ##buddyinfo#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/buddyinfo:\${EXA_PREFIX}/proc/buddyinfo"
+	            ##cgroups#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/cgroups:\${EXA_PREFIX}/proc/cgroups"
+	            ##consoles#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/consoles:\${EXA_PREFIX}/proc/consoles"
+	            ##crypto#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/crypto:\${EXA_PREFIX}/proc/crypto"
+	            ##devices#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/devices:\${EXA_PREFIX}/proc/devices"
+	            ##diskstats#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/diskstats:\${EXA_PREFIX}/proc/diskstats"
+	            ##execdomains#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/execdomains:\${EXA_PREFIX}/proc/execdomains"
+	            ##fb#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/fb:\${EXA_PREFIX}/proc/fb"
+	            ##filesystems#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/filesystems:\${EXA_PREFIX}/proc/filesystems"
+	            ##interrupts#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/interrupts:\${EXA_PREFIX}/proc/interrupts"
+	            ##iomem#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/iomem:\${EXA_PREFIX}/proc/iomem"
+	            ##ioports#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/ioports:\${EXA_PREFIX}/proc/ioports"
+	            ##kallsyms#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/kallsyms:\${EXA_PREFIX}/proc/kallsyms"
+	            ##keys#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/keys:\${EXA_PREFIX}/proc/keys"
+	            ##key-users#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/key-users:\${EXA_PREFIX}/proc/key-users"
+	            ##kmsg#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/kmsg:\${EXA_PREFIX}/proc/kmsg"
+	            ##kpageflags#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/kpageflags:\${EXA_PREFIX}/proc/kpageflags"
+	            ##loadavg#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/loadavg:\${EXA_PREFIX}/proc/loadavg"
+	            ##locks#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/locks:\${EXA_PREFIX}/proc/locks"
+	            ##misc#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/misc:\${EXA_PREFIX}/proc/misc"
+	            ##modules#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/modules:\${EXA_PREFIX}/proc/modules"
+	            ##pagetypeinfo#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/pagetypeinfo:\${EXA_PREFIX}/proc/pagetypeinfo"
+	            ##partitions#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/partitions:\${EXA_PREFIX}/proc/partitions"
+	            ##sched_debug#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/sched_debug:\${EXA_PREFIX}/proc/sched_debug"
+	            ##softirqs#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/softirqs:\${EXA_PREFIX}/proc/softirqs"
+	            ##timer_list#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/timer_list:\${EXA_PREFIX}/proc/timer_list"
+	            ##uptime#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/uptime:\${EXA_PREFIX}/proc/uptime"
+	            ##vmallocinfo#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/vmallocinfo:\${EXA_PREFIX}/proc/vmallocinfo"
+	            ##vmstat#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/vmstat:\${EXA_PREFIX}/proc/vmstat"
+	            ##zoneinfo#set -- "\${@}" "--mount=\${PROOT_PROC_DIR}/zoneinfo:\${EXA_PREFIX}/proc/zoneinfo"
+	        fi
+	    fi
+	    #------------------
+	    unset QEMU_BIN
+	    case \${SKIP_QEMU_DETECTION} in
+	    true)
+	        TMOE_QEMU=true
+	        case \${QEMU_ARCH} in
+	        default | "")
+	            printf "%s\n" "ERROR, please modify the value of QEMU_ARCH in the configuration file."
+	            TMOE_QEMU=false
+	            ;;
+	        *)
+	            TMOE_QEMU_ARCH="\${QEMU_ARCH}"
+	            check_qemu32_path
+	            check_qemu_bin
+	            ;;
+	        esac
+	        ;;
+	    *)
+	        case "\${CONTAINER_ARCH}" in
+	        "\${HOST_ARCH}") TMOE_QEMU=false ;;
+	        *)
+	            check_qemu_arch
+	            check_qemu32_path
+	            check_qemu_bin
+	            ;;
+	        esac
+	        ;;
+	    esac
+	    if [[ \${TMOE_QEMU} = true && -n \${QEMU_BIN} && \${EXA_ENABLED} != true ]]; then
+	        set -- "\${@}" "--qemu=\${QEMU_BIN}"
+	    fi
+	    #------------------
+	    if [[ \${EXA_ENABLED} = true && -e \${EXA_PREFIX} ]]; then
+	        set -- "\${@}" "\${EXA_PATH}/exa-i386_armeabi"
+	        set -- "\${@}" "--path-prefix" "\${EXA_PREFIX}"
+	        set -- "\${@}" "--vfs-hacks=\${VFS_HACKS}"
+	        set -- "\${@}" "--vfs-kind" "\${VFS_KIND}"
+	        # [[ \${IPC_EMU_SER} != true ]] || set -- "\${@}" "--ipc-emul-server"
+	        # [[ \${FORK_CONTALLER} != true ]] || set -- "\${@}" "--fork-controller"
+	        [[ -z \${SOCKET_PATH_SUFFIX} ]] || set -- "\${@}" "--socket-path-suffix" "\${SOCKET_PATH_SUFFIX}"
+	        set -- "\${@}" "--vpaths-list" "\${VPATHS_LIST}"
+	        set -- "\${@}" "--tmp-dir" "\${EXA_PREFIX}/tmp" "--"
+	    fi
+	    #------------------
+	    #SET ENV
+	    HOST_NAME="localhost"
+	    if [[ -r \${HOST_NAME_FILE} ]]; then
+	        HOST_NAME=\$(sed -n p \${HOST_NAME_FILE})
+	    else
+	        [[ ! \$(command -v hostname) ]] || HOST_NAME=\$(hostname -f)
+	    fi
+	    set -- "\${@}" "/usr/bin/env" "-i"
+	    set -- "\${@}" "HOSTNAME=\${HOST_NAME}"
+	    set -- "\${@}" "HOME=\${PROOT_HOME}"
+	    set -- "\${@}" "USER=\${PROOT_USER}"
+	    set -- "\${@}" "TERM=xterm-256color"
+	    set -- "\${@}" "SDL_IM_MODULE=fcitx"
+	    set -- "\${@}" "XMODIFIERS=\@im=fcitx"
+	    set -- "\${@}" "QT_IM_MODULE=fcitx"
+	    set -- "\${@}" "GTK_IM_MODULE=fcitx"
+	    set -- "\${@}" "TMOE_CHROOT=false"
+	    set -- "\${@}" "TMOE_PROOT=true"
+	    set -- "\${@}" "TMPDIR=/tmp"
+	    set -- "\${@}" "DISPLAY=:2"
+	    set -- "\${@}" "PULSE_SERVER=tcp:127.0.0.1:4713"
+	    if [[ -r "\${TMOE_LOCALE_FILE}" ]]; then
+	        set -- "\${@}" "LANG=\$(head -n 1 \${TMOE_LOCALE_FILE})"
+	    else
+	        set -- "\${@}" "LANG=en_US.UTF-8"
+	    fi
+	    [[ \${EXA_ENABLED} != true ]] || set -- "\${@}" "LD_LIBRARY_PATH=/usr/local/lib:/usr/lib32:/usr/lib:/lib:/usr/lib/i386-linux-gnu:/var/lib:/var/lib/dpkg:/lib/i386-linux-gnu"
+	    #SHELL
+	    [[ ! -r \${DEFAULT_SHELL_CONF} ]] || source \${DEFAULT_SHELL_CONF}
+
+	    case \${TMOE_SHELL} in
+	        "") 
+	        for i in \${DEFAULT_LOGIN_SHELL_0} \${DEFAULT_LOGIN_SHELL_1} \${DEFAULT_LOGIN_SHELL_2} \${DEFAULT_LOGIN_SHELL_3} \${DEFAULT_LOGIN_SHELL_4}; do
+	            case "\$i" in
+	            */*) New_i="\$i";;
+	            *) New_i="/bin/\$i" ;;
+	            esac
+	            if [[ -f \${ROOTFS_DIR}\${New_i} || -L \${ROOTFS_DIR}\${New_i} ]]; then
+	                TMOE_SHELL="\${New_i}"
+	                break
+	            fi
+	        done 
+			;;
+			*/*) ;;
+			*) TMOE_SHELL=/bin/\${TMOE_SHELL} ;;
+		esac
+
+	    set -- "\${@}" "SHELL=\${TMOE_SHELL}"
+	    #LOAD GLOBAL ENV FILE
+	    if [[ -s \${CONTAINER_ENV_FILE} && \${LOAD_ENV_FILE} = true ]]; then
+	        CONTAINER_BIN_PATH=\$(sed -E 's@export\s+@@;/#/d' \${CONTAINER_ENV_FILE} | grep '^PATH=\"' | grep '\${PATH:+:\${PATH}}' | sed 's@\${PATH:+:\${PATH}}\"@:@;s@PATH=\"@@')
+	        OLD_IFS="\${IFS}"
+	        IFS=\$'\n'
+	        CONTAINER_ENV_VAR="\$(sed -E 's@export\s+@@;/#/d;/^PATH=/d' \${CONTAINER_ENV_FILE})"
+	        # Do not use double quotes in CONTAINER_ENV_VAR in the for statement
+	        for i in \${CONTAINER_ENV_VAR}; do
+	            [[ -z \${i} ]] || set -- "\${@}" "\${i}"
+	        done
+	        IFS="\${OLD_IFS}"
+	    fi
+	    #PATH ENV
+	    if [[ \${PROOT_USER} = root || -z \${PROOT_USER} ]]; then
+	        set -- "\${@}" "PATH=\${CONTAINER_BIN_PATH}/usr/local/sbin:/usr/local/bin:/bin:/usr/bin:/sbin:/usr/sbin:/usr/games:/usr/local/games"
+	    else
+	        set -- "\${@}" "PATH=\${CONTAINER_BIN_PATH}/usr/local/bin:/bin:/usr/bin:/usr/games:/usr/local/games"
+	    fi
+	    #LOGIN SHELL
+	    case \${TMOE_SHELL} in
+	    */pwsh| */nushell| */nu) 
+	         case \${LOGIN_SHELL_ARG} in
+	         "-l") LOGIN_SHELL_ARG="" ;;
+	         esac
+	         ;;
+		esac
+
+		case "\${LOGIN_SHELL_ARG}" in
+		"") set -- "\${@}" "\${TMOE_SHELL}" ;;
+		*)  set -- "\${@}" "\${TMOE_SHELL}" "\${LOGIN_SHELL_ARG}" ;;
+		esac
+	    #------------------
+	    set -- "\${PROOT_PROGRAM}" "\${@}"
+	    if [[ -n \${PROOT_LOADER} && -z \${TMOE_LD_LIB_PATH} ]]; then
+	        set -- "env" "PROOT_LOADER=\${PROOT_LOADER}" "\${@}"
+	    elif [[ -z \${PROOT_LOADER} && -n \${TMOE_LD_LIB_PATH} ]]; then
+	        set -- "env" "LD_LIBRARY_PATH=\${TMOE_LD_LIB_PATH}" "\${@}"
+	    elif [[ -n \${PROOT_LOADER} && -n \${TMOE_LD_LIB_PATH} ]]; then
+	        set -- "PROOT_LOADER=\${PROOT_LOADER}" "\${@}"
+	        set -- "env" "LD_LIBRARY_PATH=\${TMOE_LD_LIB_PATH}" "\${@}"
+	    fi
+	    exec "\${@}"
+	}
+	main "\${@}"
+ENDOFPROOT
+
+#TMOE_LINUX_DIR & TRUE_ARCH_TYPE & ARCH_TYPE - \$.
+# CONFIG_FOLDER & ARCH_TYPE  & DEBIAN_CHROOT & TMPDIR - \$
+# CONTAINER_DISTRO  DEBIAN_FOLDER - \$
+
+case $(uname -o) in
+Android) ${TMOE_CHROOT_PREFIX} termux-fix-shebang "${TMOE_STARTUP_SCRIPT}" ;;
+esac
+chmod a+rx "${TMOE_STARTUP_SCRIPT}"
+ln -sf "${TMOE_SHARE_DIR}"/container/debian/debian "${PREFIX}"/bin
+# 64 | tmoe)
+#     case \${HOST_DISTRO} in
+#     Android)
+#         PROOT_64_TMOE_BIN="${TMOE_LINUX_DIR}/lib/data/data/com.termux/files/usr/bin/proot"
+#         PROOT_64_TMOE_LOADER="${TMOE_LINUX_DIR}/lib/data/data/com.termux/files/usr/libexec/proot/loader"
+#         PROOT_PROGRAM="\${PROOT_64_TMOE_BIN}"
+#         PROOT_LOADER="\${PROOT_64_TMOE_LOADER}"
+#         ;;

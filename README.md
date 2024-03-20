@@ -5,7 +5,7 @@ TMOE, More Optional Environments.
 --------
 
 Now I will try to keep TMOE under maintained after it is archived.
-Welcome for any related issue :)
+Welcome for any related issues and discussions :)
 
 --------
 
